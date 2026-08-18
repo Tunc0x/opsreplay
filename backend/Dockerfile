@@ -7,6 +7,8 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --no-install-project
 
+COPY alembic.ini /app/alembic.ini
+COPY migrations /app/migrations
 COPY app /app/app
 
 EXPOSE 8000

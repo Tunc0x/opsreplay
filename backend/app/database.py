@@ -1,9 +1,10 @@
 import os
+from collections.abc import Iterator
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, Session
 
 
 class Base(DeclarativeBase):
@@ -32,3 +33,13 @@ def is_database_healthy() -> bool:
         return False
 
     return result == 1
+
+
+def get_db_session() -> Iterator[Session]:
+    if engine is None:
+        raise RuntimeError(
+            "DATABASE_URL is required to create a database session."
+        )
+
+    with Session(engine) as session:
+        yield session

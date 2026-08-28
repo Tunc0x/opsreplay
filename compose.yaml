@@ -25,5 +25,21 @@ services:
       timeout: 5s
       retries: 5
 
+  test_db:
+    image: postgres:17-alpine
+    profiles:
+      - test
+    environment:
+      POSTGRES_DB: opsreplay_test
+      POSTGRES_USER: opsreplay_test
+      POSTGRES_PASSWORD: opsreplay_test
+    ports:
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres_data:

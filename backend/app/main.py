@@ -1,9 +1,12 @@
 from fastapi import Depends, FastAPI, HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db_session, is_database_healthy
 from app.models.organization import Organization
+from app.models.repository import Repository
 from app.schemas.organization import OrganizationCreate, OrganizationRead
+from app.schemas.repository import RepositoryCreate, RepositoryRead
 
 
 app = FastAPI(title="OpsReplay API")
@@ -51,3 +54,47 @@ def get_organization(
         raise HTTPException(status_code=404, detail="Organization not found")
 
     return organization
+
+
+@app.post(
+    "/organizations/{organization_id}/repositories",
+    response_model=RepositoryRead,
+    status_code=201,
+)
+def create_repository(
+    organization_id: int,
+    repository: RepositoryCreate,
+    session: Session = Depends(get_db_session),
+) -> Repository:
+    organization = session.get(Organization, organization_id)
+    if organization is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    db_repository = Repository(
+        organization_id=organization.id,
+        name=repository.name,
+    )
+    session.add(db_repository)
+    session.commit()
+    session.refresh(db_repository)
+    return db_repository
+
+
+@app.get(
+    "/organizations/{organization_id}/repositories",
+    response_model=list[RepositoryRead],
+)
+def list_repositories(
+    organization_id: int,
+    session: Session = Depends(get_db_session),
+) -> list[Repository]:
+    organization = session.get(Organization, organization_id)
+    if organization is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    statement = (
+        select(Repository)
+        .where(Repository.organization_id == organization.id)
+        .order_by(Repository.id.asc())
+    )
+    return list(session.scalars(statement))

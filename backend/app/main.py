@@ -98,3 +98,30 @@ def list_repositories(
         .order_by(Repository.id.asc())
     )
     return list(session.scalars(statement))
+
+
+@app.get(
+    "/organizations/{organization_id}/repositories/{repository_id}",
+    response_model=RepositoryRead,
+)
+def get_repository_from_organization(
+    organization_id: int,
+    repository_id: int,
+    session: Session = Depends(get_db_session),
+) -> Repository:
+    organization = session.get(Organization, organization_id)
+    if organization is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    statement = (
+        select(Repository)
+        .where(Repository.organization_id == organization.id, Repository.id == repository_id)
+    )
+
+    repository = session.scalar(statement)
+
+    if repository is None:
+         raise HTTPException(status_code=404, detail="Repository not found")
+
+
+    return repository

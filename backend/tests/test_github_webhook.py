@@ -1,13 +1,13 @@
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from app.main import app
-
-
-client = TestClient(app)
+from app.models.webhook_delivery import WebhookDelivery
 
 
 def test_valid_github_webhook_is_accepted(
+    client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(
@@ -36,6 +36,7 @@ def test_valid_github_webhook_is_accepted(
 
 
 def test_github_webhook_with_invalid_signature_is_rejected(
+    client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(
@@ -60,6 +61,7 @@ def test_github_webhook_with_invalid_signature_is_rejected(
 
 
 def test_github_webhook_without_signature_is_rejected(
+    client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(
@@ -80,3 +82,56 @@ def test_github_webhook_without_signature_is_rejected(
     assert response.json() == {
         "detail": "Invalid GitHub webhook signature"
     }
+
+
+def test_duplicate_github_delivery_is_stored_once(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "GITHUB_WEBHOOK_SECRET",
+        "It's a Secret to Everybody",
+    )
+    payload_body = b"Hello, World!"
+    delivery_id = "duplicate-delivery-001"
+    headers = {
+        "X-Hub-Signature-256": (
+            "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17"
+        ),
+        "X-GitHub-Event": "ping",
+        "X-GitHub-Delivery": delivery_id,
+    }
+
+    first_response = client.post(
+        "/webhooks/github",
+        content=payload_body,
+        headers=headers,
+    )
+    second_response = client.post(
+        "/webhooks/github",
+        content=payload_body,
+        headers=headers,
+    )
+
+    assert first_response.status_code == 202
+    assert first_response.json() == {
+        "status": "accepted",
+        "event": "ping",
+        "delivery_id": delivery_id,
+    }
+    assert second_response.status_code == 200
+    assert second_response.json() == {
+        "status": "duplicate",
+        "event": "ping",
+        "delivery_id": delivery_id,
+    }
+
+    statement = select(WebhookDelivery).where(
+        WebhookDelivery.delivery_id == delivery_id
+    )
+    deliveries = list(db_session.scalars(statement))
+
+    assert len(deliveries) == 1
+    assert deliveries[0].event == "ping"
+    assert deliveries[0].payload_body == payload_body

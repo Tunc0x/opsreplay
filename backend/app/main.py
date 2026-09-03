@@ -1,13 +1,15 @@
 import os
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db_session, is_database_healthy
 from app.models.organization import Organization
 from app.models.repository import Repository
+from app.models.webhook_delivery import WebhookDelivery
 from app.schemas.organization import OrganizationCreate, OrganizationRead
 from app.schemas.repository import RepositoryCreate, RepositoryRead
 from app.webhooks.github import verify_github_signature
@@ -134,8 +136,10 @@ def get_repository_from_organization(
 @app.post("/webhooks/github", status_code=202)
 async def receive_github_webhook(
     request: Request,
+    response: Response,
     github_event: Annotated[str, Header(alias="X-GitHub-Event")],
     github_delivery: Annotated[str, Header(alias="X-GitHub-Delivery")],
+    session: Session = Depends(get_db_session),
 ) -> dict[str, str]:
     secret = os.getenv("GITHUB_WEBHOOK_SECRET")
     if not secret:
@@ -156,6 +160,24 @@ async def receive_github_webhook(
             status_code=403,
             detail="Invalid GitHub webhook signature",
         )
+
+    delivery = WebhookDelivery(
+        delivery_id=github_delivery,
+        event=github_event,
+        payload_body=payload_body,
+    )
+    session.add(delivery)
+
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        response.status_code = 200
+        return {
+            "status": "duplicate",
+            "event": github_event,
+            "delivery_id": github_delivery,
+        }
 
     return {
         "status": "accepted",

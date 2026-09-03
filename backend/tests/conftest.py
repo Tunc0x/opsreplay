@@ -4,12 +4,13 @@ from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Connection
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.database import Base, get_db_session
 from app.main import app
-from app.models import Organization, Repository  # noqa: F401
+from app.models import Organization, Repository, WebhookDelivery  # noqa: F401
 
 
 DEFAULT_TEST_DATABASE_URL = (
@@ -47,29 +48,39 @@ def prepare_test_database() -> Iterator[None]:
     finally:
         test_engine.dispose()
 
-# another fixture for every individual test.
 @pytest.fixture
-def client() -> Iterator[TestClient]:
-    # ───────── SETUP ─────────
-    # again open connection for the test
+def db_connection() -> Iterator[Connection]:
     with test_engine.connect() as connection:
-        # wrap the entire test in one big transaction
         outer_transaction = connection.begin()
 
-        def override_get_db_session() -> Iterator[Session]:
-            with Session(
-                bind=connection, # This SQLAlchemy Session must use the test connection I created above.
-                join_transaction_mode="create_savepoint", # The application plays inside a sandbox that itself sits inside a bigger transaction controlled by pytest.
-            ) as session:
-                yield session
-        # we override the dependency so we are not using the real database rather our test db, thats the power of dependency injection
-        app.dependency_overrides[get_db_session] = override_get_db_session
-
         try:
-            with TestClient(app) as test_client:
-                yield test_client # TestClient lets pytest talk to FastAPI approximately as if a frontend/browser were making HTTP requests.
-                # ── test runs while paused here ──
+            yield connection
         finally:
-            # ───────── TEARDOWN ─────────
-            app.dependency_overrides.clear()
             outer_transaction.rollback()
+
+
+@pytest.fixture
+def db_session(db_connection: Connection) -> Iterator[Session]:
+    with Session(
+        bind=db_connection,
+        join_transaction_mode="create_savepoint",
+    ) as session:
+        yield session
+
+
+@pytest.fixture
+def client(db_connection: Connection) -> Iterator[TestClient]:
+    def override_get_db_session() -> Iterator[Session]:
+        with Session(
+            bind=db_connection,
+            join_transaction_mode="create_savepoint",
+        ) as session:
+            yield session
+
+    app.dependency_overrides[get_db_session] = override_get_db_session
+
+    try:
+        with TestClient(app) as test_client:
+            yield test_client
+    finally:
+        app.dependency_overrides.clear()

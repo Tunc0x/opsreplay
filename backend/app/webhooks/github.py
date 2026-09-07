@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import json
 
 
 def verify_github_signature(
@@ -18,3 +19,23 @@ def verify_github_signature(
     expected_signature = f"sha256={digest}"
 
     return hmac.compare_digest(expected_signature, signature_header)
+
+
+def extract_github_repository_id(payload_body: bytes) -> int | None:
+    try:
+        payload = json.loads(payload_body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    repository = payload.get("repository")
+    if not isinstance(repository, dict):
+        return None
+
+    repository_id = repository.get("id")
+    if type(repository_id) is not int:
+        return None
+
+    return repository_id

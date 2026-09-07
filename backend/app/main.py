@@ -12,7 +12,10 @@ from app.models.repository import Repository
 from app.models.webhook_delivery import WebhookDelivery
 from app.schemas.organization import OrganizationCreate, OrganizationRead
 from app.schemas.repository import RepositoryCreate, RepositoryRead
-from app.webhooks.github import verify_github_signature
+from app.webhooks.github import (
+    extract_github_repository_id,
+    verify_github_signature,
+)
 
 
 app = FastAPI(title="OpsReplay API")
@@ -161,9 +164,21 @@ async def receive_github_webhook(
             detail="Invalid GitHub webhook signature",
         )
 
+    github_repository_id = extract_github_repository_id(payload_body)
+    repository_id = None
+
+    if github_repository_id is not None:
+        statement = select(Repository).where(
+            Repository.github_repository_id == github_repository_id
+        )
+        repository = session.scalar(statement)
+        if repository is not None:
+            repository_id = repository.id
+
     delivery = WebhookDelivery(
         delivery_id=github_delivery,
         event=github_event,
+        repository_id=repository_id,
         payload_body=payload_body,
     )
     session.add(delivery)

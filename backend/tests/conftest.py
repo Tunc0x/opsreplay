@@ -10,7 +10,12 @@ from sqlalchemy.orm import Session
 
 from app.database import Base, get_db_session
 from app.main import app
-from app.models import Organization, Repository, WebhookDelivery  # noqa: F401
+from app.models import (  # noqa: F401
+    GitHubInstallation,
+    Organization,
+    Repository,
+    WebhookDelivery,
+)
 
 
 DEFAULT_TEST_DATABASE_URL = (

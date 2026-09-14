@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 if TYPE_CHECKING:
+    from app.models.github_installation import GitHubInstallation
     from app.models.repository import Repository
 
 
@@ -24,4 +25,8 @@ class Organization(Base):
     )
     repositories: Mapped[list[Repository]] = relationship(
         back_populates="organization"
+    )
+    github_installation: Mapped[GitHubInstallation | None] = relationship(
+        back_populates="organization",
+        uselist=False,
     )

@@ -11,6 +11,10 @@ import jwt
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.models.github_installation import (
+    GitHubInstallation as GitHubInstallationModel,
+)
+from app.models.organization import Organization
 from app.models.repository import Repository
 
 
@@ -156,14 +160,95 @@ def list_installation_repositories(
 
     return repositories
 
+
+def register_github_installation(
+    session: Session,
+    opsreplay_organization_id: int,
+    github_installation_id: int,
+    github_installations: Sequence[GitHubInstallation],
+) -> GitHubInstallationModel:
+    organization = session.get(Organization, opsreplay_organization_id)
+    if organization is None:
+        raise GitHubAppError("The OpsReplay organization does not exist.")
+
+    verified_installation = next(
+        (
+            installation
+            for installation in github_installations
+            if type(installation.get("id")) is int
+            and installation["id"] == github_installation_id
+        ),
+        None,
+    )
+    if verified_installation is None:
+        raise GitHubAppError(
+            "The requested GitHub installation was not returned by GitHub."
+        )
+
+    existing_installation = organization.github_installation
+    if existing_installation is not None:
+        if (
+            existing_installation.github_installation_id
+            == github_installation_id
+        ):
+            return existing_installation
+        raise GitHubAppError(
+            "The OpsReplay organization is already linked to a different "
+            "GitHub installation."
+        )
+
+    installation = GitHubInstallationModel(
+        organization_id=organization.id,
+        github_installation_id=github_installation_id,
+        account_login=verified_installation["account_login"],
+        account_type=verified_installation["account_type"],
+    )
+    session.add(installation)
+    try:
+        session.commit()
+    except IntegrityError as error:
+        session.rollback()
+        raise GitHubAppError(
+            "The Organization or GitHub installation is already registered."
+        ) from error
+
+    session.refresh(installation)
+    return installation
+
+
+def get_github_installation_for_organization(
+    session: Session,
+    opsreplay_organization_id: int,
+) -> GitHubInstallationModel:
+    organization = session.get(Organization, opsreplay_organization_id)
+    if organization is None:
+        raise GitHubAppError("The OpsReplay organization does not exist.")
+
+    installation = organization.github_installation
+    if installation is None:
+        raise GitHubAppError(
+            "The OpsReplay organization has no registered GitHub installation."
+        )
+    return installation
+
+
 # link_github_repository() safely connects an OpsReplay repository record to a real GitHub repository, 
 # after verifying that the current GitHub App installation is actually allowed to access that GitHub repository.
 def link_github_repository(
     session: Session,
+    opsreplay_organization_id: int,
     opsreplay_repository_id: int,
     github_repository_id: int,
     installation_repositories: Sequence[GitHubRepository],
 ) -> Repository:
+    repository = session.get(Repository, opsreplay_repository_id)
+    if repository is None:
+        raise GitHubAppError("The OpsReplay repository does not exist.")
+    if repository.organization_id != opsreplay_organization_id:
+        raise GitHubAppError(
+            "The OpsReplay repository does not belong to the requested Organization."
+        )
+
     accessible_repository = next(
         (
             repository
@@ -178,9 +263,6 @@ def link_github_repository(
             "The requested GitHub repository is not accessible to this installation."
         )
 
-    repository = session.get(Repository, opsreplay_repository_id)
-    if repository is None:
-        raise GitHubAppError("The OpsReplay repository does not exist.")
     if (
         repository.github_repository_id is not None
         and repository.github_repository_id != github_repository_id

@@ -58,6 +58,7 @@ def test_link_github_repository_uses_verified_accessible_id(
 
     linked_repository = link_github_repository(
         db_session,
+        organization.id,
         repository.id,
         1_296_269,
         [
@@ -91,6 +92,7 @@ def test_link_github_repository_rejects_inaccessible_id(
     with pytest.raises(GitHubAppError, match="not accessible"):
         link_github_repository(
             db_session,
+            organization.id,
             repository.id,
             9_999_999,
             [

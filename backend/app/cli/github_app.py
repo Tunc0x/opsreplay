@@ -9,9 +9,11 @@ from sqlalchemy.orm import Session
 from app import database
 from app.integrations.github_app import (
     GitHubAppError,
+    get_github_installation_for_organization,
     link_github_repository,
     list_github_app_installations,
     list_installation_repositories,
+    register_github_installation,
 )
 
 
@@ -21,17 +23,40 @@ def _build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("installations", help="List GitHub App installations.")
 
+    register_parser = subparsers.add_parser(
+        "register-installation",
+        help="Register an installation for an OpsReplay organization.",
+    )
+    register_parser.add_argument(
+        "--opsreplay-organization-id",
+        type=int,
+        required=True,
+    )
+    register_parser.add_argument(
+        "--github-installation-id",
+        type=int,
+        required=True,
+    )
+
     repositories_parser = subparsers.add_parser(
         "repositories",
         help="List repositories accessible to an installation.",
     )
-    repositories_parser.add_argument("--installation-id", type=int, required=True)
+    repositories_parser.add_argument(
+        "--opsreplay-organization-id",
+        type=int,
+        required=True,
+    )
 
     link_parser = subparsers.add_parser(
         "link",
         help="Link an existing OpsReplay repository to GitHub.",
     )
-    link_parser.add_argument("--installation-id", type=int, required=True)
+    link_parser.add_argument(
+        "--opsreplay-organization-id",
+        type=int,
+        required=True,
+    )
     link_parser.add_argument("--opsreplay-repository-id", type=int, required=True)
     link_parser.add_argument("--github-repository-id", type=int, required=True)
 
@@ -71,21 +96,53 @@ def main() -> int:
                 )
             return 0
 
+        if args.command == "register-installation":
+            installations = list_github_app_installations(client_id, private_key)
+            if database.engine is None:
+                raise GitHubAppError("DATABASE_URL is required for this command.")
+            with Session(database.engine) as session:
+                installation = register_github_installation(
+                    session,
+                    args.opsreplay_organization_id,
+                    args.github_installation_id,
+                    installations,
+                )
+                installation_details = (
+                    installation.organization_id,
+                    installation.github_installation_id,
+                    installation.account_login,
+                    installation.account_type,
+                )
+            print(
+                f"Registered OpsReplay organization {installation_details[0]} "
+                f"with GitHub installation {installation_details[1]} "
+                f"({installation_details[2]}, {installation_details[3]})."
+            )
+            return 0
+
+        if database.engine is None:
+            raise GitHubAppError("DATABASE_URL is required for this command.")
+        with Session(database.engine) as session:
+            installation = get_github_installation_for_organization(
+                session,
+                args.opsreplay_organization_id,
+            )
+            github_installation_id = installation.github_installation_id
+
         repositories = list_installation_repositories(
             client_id,
             private_key,
-            args.installation_id,
+            github_installation_id,
         )
         if args.command == "repositories":
             for repository in repositories:
                 print(f"Repository {repository['id']}: {repository['full_name']}")
             return 0
 
-        if database.engine is None:
-            raise GitHubAppError("DATABASE_URL is required for the link command.")
         with Session(database.engine) as session:
             linked_repository = link_github_repository(
                 session,
+                args.opsreplay_organization_id,
                 args.opsreplay_repository_id,
                 args.github_repository_id,
                 repositories,

@@ -16,6 +16,29 @@ services:
       db:
         condition: service_healthy
 
+  webhook_ingress:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command:
+      - /app/.venv/bin/fastapi
+      - run
+      - app/webhook_main.py
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    profiles:
+      - webhook
+    ports:
+      - "127.0.0.1:8001:8000"
+    environment:
+      DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}"
+      GITHUB_WEBHOOK_SECRET: "${GITHUB_WEBHOOK_SECRET}"
+    depends_on:
+      db:
+        condition: service_healthy
+
   db:
     image: postgres:17-alpine
     environment:

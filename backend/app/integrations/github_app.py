@@ -160,17 +160,20 @@ def list_installation_repositories(
 
     return repositories
 
-
+# Connects OpsReplay organization to GitHub installation
 def register_github_installation(
     session: Session,
     opsreplay_organization_id: int,
     github_installation_id: int,
     github_installations: Sequence[GitHubInstallation],
 ) -> GitHubInstallationModel:
+
+    # first check whether the opsreplay organization exists.
     organization = session.get(Organization, opsreplay_organization_id)
     if organization is None:
         raise GitHubAppError("The OpsReplay organization does not exist.")
 
+    # Did Github actually return installation X as one of the installations belonging to our GitHub App?
     verified_installation = next(
         (
             installation
@@ -185,7 +188,9 @@ def register_github_installation(
             "The requested GitHub installation was not returned by GitHub."
         )
 
+    # Ensure Idempotency
     existing_installation = organization.github_installation
+    # They're already linked nothing needs to change
     if existing_installation is not None:
         if (
             existing_installation.github_installation_id
@@ -197,12 +202,14 @@ def register_github_installation(
             "GitHub installation."
         )
 
+    # If its not connected to an installation yet create the ORM
     installation = GitHubInstallationModel(
         organization_id=organization.id,
         github_installation_id=github_installation_id,
         account_login=verified_installation["account_login"],
         account_type=verified_installation["account_type"],
     )
+    # add to our database
     session.add(installation)
     try:
         session.commit()
@@ -244,6 +251,7 @@ def link_github_repository(
     repository = session.get(Repository, opsreplay_repository_id)
     if repository is None:
         raise GitHubAppError("The OpsReplay repository does not exist.")
+    # Ensure the repository is linked to the provided organization.
     if repository.organization_id != opsreplay_organization_id:
         raise GitHubAppError(
             "The OpsReplay repository does not belong to the requested Organization."

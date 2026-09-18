@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db_session
 from app.models.repository import Repository
 from app.models.webhook_delivery import WebhookDelivery
+from app.models.webhook_delivery_outbox import WebhookDeliveryOutbox
 from app.webhooks.github import (
     extract_github_repository_id,
     verify_github_signature,
@@ -16,6 +17,8 @@ from app.webhooks.github import (
 
 
 router = APIRouter()
+
+DELIVERY_ID_UNIQUE_CONSTRAINT = "uq_webhook_deliveries_delivery_id"
 
 
 @router.post("/webhooks/github", status_code=202)
@@ -64,11 +67,22 @@ async def receive_github_webhook(
         payload_body=payload_body,
     )
     session.add(delivery)
-
+    # create an outbox row in the same database transaction for every new webhook
     try:
+        session.flush() # send to PostgreSQL so SQLAlchemy gets delivery.id
+        session.add(
+            WebhookDeliveryOutbox(webhook_delivery_id=delivery.id)
+        )
         session.commit()
-    except IntegrityError:
+    except IntegrityError as error:
         session.rollback()
+        constraint_name = getattr(
+            getattr(error.orig, "diag", None),
+            "constraint_name",
+            None,
+        )
+        if constraint_name != DELIVERY_ID_UNIQUE_CONSTRAINT:
+            raise
         response.status_code = 200
         return {
             "status": "duplicate",

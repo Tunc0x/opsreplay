@@ -10,6 +10,7 @@ from app.models import (  # noqa: F401
     Organization,
     Repository,
     WebhookDelivery,
+    WebhookDeliveryOutbox,
 )
 
 # this is the Alembic Config object, which provides

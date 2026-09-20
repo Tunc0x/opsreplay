@@ -101,5 +101,28 @@ services:
       sqs:
         condition: service_started
 
+  webhook_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command:
+      - /app/.venv/bin/python
+      - -m
+      - app.workers.webhook_worker
+    profiles:
+      - queue
+    environment:
+      DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}"
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: x
+      AWS_SECRET_ACCESS_KEY: x
+      SQS_ENDPOINT_URL: http://sqs:9324
+      SQS_WEBHOOK_QUEUE_NAME: opsreplay-webhooks
+    depends_on:
+      db:
+        condition: service_healthy
+      sqs:
+        condition: service_started
+
 volumes:
   postgres_data:

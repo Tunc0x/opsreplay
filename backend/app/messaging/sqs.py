@@ -19,6 +19,21 @@ class SQSClient(Protocol):
         MessageBody: str,
     ) -> dict[str, Any]: ...
 
+    def receive_message(
+        self,
+        *,
+        QueueUrl: str,
+        MaxNumberOfMessages: int,
+        WaitTimeSeconds: int,
+    ) -> dict[str, Any]: ...
+
+    def delete_message(
+        self,
+        *,
+        QueueUrl: str,
+        ReceiptHandle: str,
+    ) -> dict[str, Any]: ...
+
 
 def create_sqs_client() -> SQSClient:
     region = os.getenv("AWS_REGION")
@@ -62,4 +77,34 @@ def publish_webhook_delivery_reference(
     sqs_client.send_message(
         QueueUrl=queue_url,
         MessageBody=message_body,
+    )
+
+
+def receive_webhook_message(
+    sqs_client: SQSClient,
+    queue_url: str,
+) -> dict[str, Any] | None:
+    # If the queue is empty, keep this receive request open for up to
+    # 10 seconds. If no message arrives, return no message.
+    response = sqs_client.receive_message(
+        QueueUrl=queue_url,
+        MaxNumberOfMessages=1,
+        WaitTimeSeconds=10,
+    )
+    messages = response.get("Messages")
+    if messages is None or messages == []:
+        return None
+    if not isinstance(messages, list) or not isinstance(messages[0], dict):
+        raise RuntimeError("SQS returned malformed message data.")
+    return messages[0]
+
+
+def delete_webhook_message(
+    sqs_client: SQSClient,
+    queue_url: str,
+    receipt_handle: str,
+) -> None:
+    sqs_client.delete_message(
+        QueueUrl=queue_url,
+        ReceiptHandle=receipt_handle,
     )

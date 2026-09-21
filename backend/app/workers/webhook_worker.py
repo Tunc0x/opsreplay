@@ -17,7 +17,9 @@ from app.messaging.sqs import (
     receive_webhook_message,
     resolve_webhook_queue_url,
 )
+from app.models.timeline_event import TimelineEvent
 from app.models.webhook_delivery import WebhookDelivery
+from app.processing.github import extract_github_push_ref
 
 
 FAILURE_SLEEP_SECONDS = 2
@@ -72,6 +74,23 @@ def process_webhook_delivery(
         # checks whether it has been already processed -> ensures idempotency
         if delivery.processed_at is not None:
             return False
+
+        if delivery.event == "push":
+            if delivery.repository_id is None:
+                raise WebhookWorkerError(
+                    "A GitHub push delivery requires a linked Repository."
+                )
+            ref = extract_github_push_ref(delivery.payload_body)
+            session.add(
+                TimelineEvent(
+                    repository_id=delivery.repository_id,
+                    webhook_delivery_id=delivery.id,
+                    source="github",
+                    event_type="push",
+                    summary=f"Push to {ref}",
+                    observed_at=delivery.received_at,
+                )
+            )
 
         delivery.processed_at = now()
         session.commit()

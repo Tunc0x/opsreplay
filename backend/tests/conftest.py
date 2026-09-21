@@ -14,6 +14,7 @@ from app.models import (  # noqa: F401
     GitHubInstallation,
     Organization,
     Repository,
+    TimelineEvent,
     WebhookDelivery,
     WebhookDeliveryOutbox,
 )

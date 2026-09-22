@@ -1,0 +1,139 @@
+---
+import { FileText, Link2, Rocket, Activity, TriangleAlert, Check } from '@lucide/astro';
+---
+
+<div class="report-demo">
+  <article class="report-paper">
+    <div class="report-toolbar">
+      <span>
+        <FileText size={15} /> Postmortem / INC-042
+      </span>
+      <span class="draft-badge">Draft for review</span>
+    </div>
+    <div class="report-content">
+      <p class="mono report-kicker">INCIDENT REPORT</p>
+      <h3>Checkout API latency spike</h3>
+      <div class="report-meta">
+        checkout-api <span>·</span> 22 Sep 2026
+      </div>
+      <div class="report-divider"></div>
+      <h4>Summary</h4>
+      <p>
+        Errors and elevated latency were observed in the Checkout API. An incident was opened at
+        09:56 UTC.{' '}
+        <button
+          class="citation"
+          type="button"
+          data-citation="incident"
+          aria-label="Show evidence 3: incident opened"
+          aria-pressed="false"
+        >
+          3
+        </button>
+      </p>
+      <div class="report-highlight">
+        <h4>Probable contributing change</h4>
+        <p>
+          Deployment <code>7ac04e2</code> occurred five minutes before error rates began increasing.{' '}
+          <button
+            class="citation"
+            type="button"
+            data-citation="deploy"
+            aria-label="Show evidence 1: deployment"
+            aria-pressed="true"
+          >
+            1
+          </button>{' '}
+          <button
+            class="citation"
+            type="button"
+            data-citation="error"
+            aria-label="Show evidence 2: error increase"
+            aria-pressed="false"
+          >
+            2
+          </button>
+        </p>
+      </div>
+      <div class="report-caveat">
+        <span class="caveat-marker">!</span>
+        <p>
+          Timing suggests a change to investigate.
+          <br />
+          Root cause is not yet confirmed.
+        </p>
+      </div>
+      <h4>Next steps</h4>
+      <p>
+        Review the deployment diff and validate the connection-pool behavior before attributing a
+        cause.
+      </p>
+      <div class="report-footer">
+        <Link2 size={14} /> Claims stay connected to the record.
+      </div>
+    </div>
+  </article>
+  <div class="report-evidence">
+    <div class="report-evidence-title">
+      <span class="eyebrow">SUPPORTING EVIDENCE</span>
+      <span class="mono">3 events</span>
+    </div>
+    <div class="evidence-connector" aria-hidden="true"></div>
+    <article class="source-card is-active" id="source-deploy" data-source="deploy">
+      <div class="source-head">
+        <span class="source-type mint">
+          <Rocket size={16} /> Deployment
+        </span>
+        <span class="source-number">01</span>
+      </div>
+      <h4>Production deployment completed</h4>
+      <p>
+        <code>7ac04e2</code>
+        <span>checkout-api</span>
+      </p>
+      <div class="source-bottom">
+        <time datetime="2026-09-22T09:47:00Z">09:47 UTC</time>
+        <span>
+          Evidence <Link2 size={12} />
+        </span>
+      </div>
+    </article>
+    <article class="source-card" id="source-error" data-source="error">
+      <div class="source-head">
+        <span class="source-type amber">
+          <Activity size={16} /> Monitoring
+        </span>
+        <span class="source-number">02</span>
+      </div>
+      <h4>Error rate begins increasing</h4>
+      <p>5xx responses above baseline</p>
+      <div class="source-bottom">
+        <time datetime="2026-09-22T09:52:00Z">09:52 UTC</time>
+        <span>
+          Evidence <Link2 size={12} />
+        </span>
+      </div>
+    </article>
+    <article class="source-card" id="source-incident" data-source="incident">
+      <div class="source-head">
+        <span class="source-type red">
+          <TriangleAlert size={16} /> Incident
+        </span>
+        <span class="source-number">03</span>
+      </div>
+      <h4>Checkout API latency spike</h4>
+      <p>
+        INC-042<span>Severity 2</span>
+      </p>
+      <div class="source-bottom">
+        <time datetime="2026-09-22T09:56:00Z">09:56 UTC</time>
+        <span>
+          Evidence <Link2 size={12} />
+        </span>
+      </div>
+    </article>
+    <p class="citation-help" id="citation-status" role="status">
+      <Check size={14} /> Reference 1 selected · deployment at 09:47
+    </p>
+  </div>
+</div>

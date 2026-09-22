@@ -1,0 +1,253 @@
+---
+import {
+  GitPullRequest,
+  Rocket,
+  Activity,
+  Bell,
+  TriangleAlert,
+  Search,
+  ChevronRight,
+  PanelLeft,
+  GitBranch,
+  CircleCheck,
+  Link2,
+  Clock3,
+  ListFilter,
+  FileText,
+} from '@lucide/astro';
+import Logo from './Logo.astro';
+const events = [
+  {
+    id: 'pr',
+    time: '09:41',
+    icon: GitPullRequest,
+    tone: 'muted',
+    group: 'changes',
+    title: 'Pull request #842 merged',
+    detail: 'Refactor checkout connection pool',
+    tag: 'GitHub',
+    evidence: 'Pull request #842',
+    note: 'The connection pool refactor was merged into main. This records a code change; it does not establish the cause of the incident.',
+    source: 'GitHub · pull_request',
+    ref: 'PR #842 → main',
+  },
+  {
+    id: 'deploy',
+    time: '09:47',
+    icon: Rocket,
+    tone: 'mint',
+    group: 'changes',
+    title: 'Production deployment completed',
+    detail: 'checkout-api',
+    tag: '7ac04e2',
+    evidence: 'Deployment 7ac04e2',
+    note: 'Deployed five minutes before the first recorded error increase. A relevant change to investigate, with causality still unconfirmed.',
+    source: 'Deployment event',
+    ref: 'SHA 7ac04e2',
+  },
+  {
+    id: 'error',
+    time: '09:52',
+    icon: Activity,
+    tone: 'amber',
+    group: 'signals',
+    title: 'Error rate begins increasing',
+    detail: '5xx responses above baseline',
+    tag: 'Monitoring',
+    evidence: 'Error rate increase',
+    note: 'The first recorded increase in 5xx responses occurred at 09:52, five minutes after the deployment.',
+    source: 'Monitoring event',
+    ref: 'checkout-api · 5xx',
+  },
+  {
+    id: 'alert',
+    time: '09:54',
+    icon: Bell,
+    tone: 'amber',
+    group: 'signals',
+    title: 'Latency alert triggered',
+    detail: 'p95 latency exceeds 800 ms',
+    tag: 'Alert',
+    evidence: 'Latency threshold exceeded',
+    note: 'The p95 latency alert fired at 09:54. This signal follows the error increase and precedes the incident being opened.',
+    source: 'Alert event',
+    ref: 'p95 > 800 ms',
+  },
+  {
+    id: 'incident',
+    time: '09:56',
+    icon: TriangleAlert,
+    tone: 'red',
+    group: 'signals',
+    title: 'Incident opened',
+    detail: 'Checkout API latency spike',
+    tag: 'SEV 2',
+    evidence: 'Incident INC-042',
+    note: 'The incident was opened after both the error and latency signals. Its start is recorded separately from the earlier production symptoms.',
+    source: 'Incident event',
+    ref: 'INC-042 · investigating',
+  },
+  {
+    id: 'note',
+    time: '10:04',
+    icon: Search,
+    tone: 'mint',
+    group: 'notes',
+    title: 'Deployment flagged for investigation',
+    detail: '7ac04e2 marked as potentially relevant',
+    tag: 'Note',
+    evidence: 'Investigation note',
+    note: 'An engineer flagged deployment 7ac04e2 for review. Temporal proximity is a lead, not proof of a root cause.',
+    source: 'Engineer note',
+    ref: 'Linked to 7ac04e2',
+  },
+];
+---
+
+<div class="product-window" id="product" aria-label="Interactive incident timeline preview">
+  <div class="window-top">
+    <span class="window-lights" aria-hidden="true">
+      <i></i>
+      <i></i>
+      <i></i>
+    </span>
+    <span class="window-address">
+      <Logo compact /> OpsReplay <span>/</span> Incident workspace
+    </span>
+    <span class="preview-label">PRODUCT PREVIEW</span>
+  </div>
+  <div class="workspace">
+    <aside class="workspace-rail" aria-label="Example workspace context">
+      <div class="workspace-team">
+        <span class="team-symbol">E</span> Engineering <ChevronRight size={13} />
+      </div>
+      <div class="rail-caption">WORKSPACE</div>
+      <div class="rail-item active">
+        <Clock3 size={16} /> Timeline <span>6</span>
+      </div>
+      <div class="rail-item">
+        <TriangleAlert size={16} /> Incidents
+      </div>
+      <div class="rail-item">
+        <Rocket size={16} /> Deployments
+      </div>
+      <div class="rail-item">
+        <FileText size={16} /> Postmortems
+      </div>
+      <div class="rail-bottom">
+        <GitBranch size={15} />
+        <span>
+          checkout-api
+          <br />
+          <small>production</small>
+        </span>
+      </div>
+    </aside>
+    <div class="workspace-main">
+      <div class="workspace-breadcrumb">
+        <PanelLeft size={14} />
+        <span>Incidents</span>
+        <ChevronRight size={12} />
+        <span>INC-042</span>
+        <span class="sample-label">Example data</span>
+      </div>
+      <div class="incident-heading">
+        <div class="incident-status">
+          <span class="severity">SEV 2</span>
+          <span class="status">
+            <span class="status-dot"></span>Investigating
+          </span>
+        </div>
+        <h2>Checkout API latency spike</h2>
+        <p>
+          <span>checkout-api</span>
+          <span class="meta-separator">/</span>
+          <span>production</span>
+          <span class="meta-separator">/</span>
+          <span>Today, 09:56 UTC</span>
+        </p>
+      </div>
+      <div class="timeline-toolbar">
+        <div role="group" aria-label="Filter example timeline" class="timeline-filters">
+          <button type="button" data-filter="all" aria-pressed="true">
+            All events <span>6</span>
+          </button>
+          <button type="button" data-filter="changes" aria-pressed="false">
+            Changes
+          </button>
+          <button type="button" data-filter="signals" aria-pressed="false">
+            Signals
+          </button>
+        </div>
+        <span class="timeline-zone">
+          <ListFilter size={14} /> UTC
+        </span>
+      </div>
+      <div class="timeline-body">
+        <ol class="event-list">
+          {events.map((event) => (
+            <li data-event-group={event.group}>
+              <button
+                type="button"
+                class:list={['event', event.id === 'deploy' && 'selected']}
+                data-event={event.id}
+                data-evidence-title={event.evidence}
+                data-evidence-note={event.note}
+                data-evidence-source={event.source}
+                data-evidence-ref={event.ref}
+                aria-pressed={event.id === 'deploy'}
+                aria-controls="timeline-evidence"
+              >
+                <time datetime={`2026-09-22T${event.time}:00Z`}>{event.time}</time>
+                <span class:list={['event-icon', event.tone]}>
+                  <event.icon size={15} aria-hidden="true" />
+                </span>
+                <span class="event-content">
+                  <span class="event-title">{event.title}</span>
+                  <span class="event-detail">{event.detail}</span>
+                </span>
+                <span class:list={['event-tag', event.id === 'incident' && 'red']}>
+                  {event.tag}
+                </span>
+                <ChevronRight size={13} class="event-chevron" aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ol>
+        <aside class="evidence-panel" id="timeline-evidence" aria-live="polite" aria-atomic="true">
+          <div class="eyebrow">
+            <Link2 size={14} /> EVENT EVIDENCE
+          </div>
+          <div class="evidence-icon">
+            <Rocket size={20} />
+          </div>
+          <h3 id="evidence-title">Deployment 7ac04e2</h3>
+          <p id="evidence-note">
+            Deployed five minutes before the first recorded error increase. A relevant change to
+            investigate, with causality still unconfirmed.
+          </p>
+          <dl>
+            <dt>Source</dt>
+            <dd id="evidence-source">Deployment event</dd>
+            <dt>Reference</dt>
+            <dd id="evidence-ref">SHA 7ac04e2</dd>
+          </dl>
+          <div class="evidence-foot">
+            <CircleCheck size={14} /> Linked to source event
+          </div>
+        </aside>
+      </div>
+      <div class="workspace-footer">
+        <span>
+          <span class="tiny-dot"></span>
+          <span id="event-count" role="status">
+            6 events in chronological order
+          </span>
+        </span>
+        <span>
+          Select an event to inspect its evidence <ChevronRight size={12} />
+        </span>
+      </div>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,18 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Logo from '../components/Logo.astro';
+import Button from '../components/Button.astro';
+---
+
+<Layout
+  title="Page not found — OpsReplay"
+  description="This page is not part of the OpsReplay timeline."
+>
+  <main class="not-found container" id="main">
+    <Logo />
+    <p class="eyebrow">404 · NO EVENT HERE</p>
+    <h1>This page is off the timeline.</h1>
+    <p>The link may have moved. Head back to the product.</p>
+    <Button href="/">Back to OpsReplay</Button>
+  </main>
+</Layout>

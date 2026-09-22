@@ -1,0 +1,455 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Logo from '../components/Logo.astro';
+import Button from '../components/Button.astro';
+import Card from '../components/Card.astro';
+import Timeline from '../components/Timeline.astro';
+import Postmortem from '../components/Postmortem.astro';
+import {
+  ArrowRight,
+  ArrowUpRight,
+  GitBranch,
+  GitPullRequest,
+  GitFork,
+  Rocket,
+  Activity,
+  Clock3,
+  Link2,
+  FileCheck,
+  Plug,
+  Cloud,
+  Bell,
+  TriangleAlert,
+  Check,
+  Menu,
+  X,
+  Terminal,
+  Layers,
+} from '@lucide/astro';
+const repo = 'https://github.com/Tunc0x/opsreplay';
+const steps = [
+  {
+    number: '01',
+    icon: Plug,
+    title: 'Connect your tools',
+    text: 'Start with GitHub. Deployment and monitoring sources are next.',
+  },
+  {
+    number: '02',
+    icon: Clock3,
+    title: 'Build the record',
+    text: 'Capture timestamped events as your software changes.',
+  },
+  {
+    number: '03',
+    icon: Activity,
+    title: 'Follow the sequence',
+    text: 'See what happened before, during, and after an incident.',
+  },
+  {
+    number: '04',
+    icon: FileCheck,
+    title: 'Write from evidence',
+    text: 'Turn the recorded context into a referenced draft for review.',
+  },
+];
+const integrations = [
+  { icon: Rocket, title: 'Deployment systems', description: 'Releases, rollouts, and rollbacks' },
+  { icon: Bell, title: 'Monitoring & alerts', description: 'Errors and production signals' },
+  { icon: Cloud, title: 'Cloud infrastructure', description: 'Changes to the systems underneath' },
+  {
+    icon: TriangleAlert,
+    title: 'Incident systems',
+    description: 'The response, alongside the cause',
+  },
+];
+---
+
+<Layout>
+  <header class="site-header">
+    <nav class="container navigation" aria-label="Main navigation">
+      <a class="home-link" href="/" aria-label="OpsReplay home">
+        <Logo />
+      </a>
+      <div class="desktop-links">
+        <a href="#product">Product</a>
+        <a href="#how-it-works">How it works</a>
+        <a href="#integrations">Integrations</a>
+        <a href={repo} rel="noopener noreferrer">
+          GitHub <ArrowUpRight size={12} />
+        </a>
+      </div>
+      <Button href={repo} external class="nav-cta">
+        Follow development
+      </Button>
+      <button
+        class="menu-toggle"
+        type="button"
+        aria-label="Open navigation"
+        aria-expanded="false"
+        aria-controls="mobile-navigation"
+      >
+        <Menu class="menu-icon" size={22} />
+        <X class="close-icon" size={22} />
+      </button>
+    </nav>
+    <nav
+      class="mobile-navigation container"
+      id="mobile-navigation"
+      aria-label="Mobile navigation"
+      hidden
+    >
+      <a href="#product">Product</a>
+      <a href="#how-it-works">How it works</a>
+      <a href="#integrations">Integrations</a>
+      <a href={repo}>
+        View on GitHub <ArrowUpRight size={16} />
+      </a>
+    </nav>
+  </header>
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-grid" aria-hidden="true"></div>
+      <div class="container hero-content">
+        <a href={repo} class="development-badge">
+          <span class="badge-dot"></span> Building in the open <span class="badge-divider"></span>{' '}
+          Follow along <ArrowRight size={13} />
+        </a>
+        <h1 id="hero-title">
+          See what changed
+          <br /> before <span>production broke.</span>
+        </h1>
+        <p class="hero-description">
+          Code changes, deployments, alerts, and incidents.
+          <br class="desktop-break" /> One timeline to investigate what happened. Evidence to
+          explain why.
+        </p>
+        <div class="hero-actions">
+          <Button href="#product">Explore the timeline</Button>
+          <Button href={repo} variant="secondary" external arrow={false}>
+            <GitFork size={17} /> View on GitHub
+          </Button>
+        </div>
+        <p class="hero-note">Release & incident intelligence for small engineering teams.</p>
+      </div>
+      <div class="container product-container">
+        <Timeline />
+        <p class="mockup-caption">
+          <span>One record. From the first change to the final review.</span>
+          <span>Illustrative product preview · Early development</span>
+        </p>
+      </div>
+    </section>
+
+    <section class="context-strip container" aria-label="Product approach">
+      <p>
+        The context you need.
+        <br />
+        <strong>Already in sequence.</strong>
+      </p>
+      <div class="context-stream">
+        <span>
+          <GitPullRequest size={18} /> Code changes
+        </span>
+        <i></i>
+        <span>
+          <Rocket size={18} /> Deployments
+        </span>
+        <i></i>
+        <span>
+          <Activity size={18} /> Production signals
+        </span>
+        <i></i>
+        <span class="mint">
+          <Clock3 size={18} /> One timeline
+        </span>
+      </div>
+    </section>
+
+    <section class="section container" id="capabilities" aria-labelledby="capabilities-title">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">CONTEXT, WITHOUT THE TAB HOPPING</p>
+          <h2 id="capabilities-title">
+            The incident is one story.
+            <br />
+            <span>Your tools tell it in pieces.</span>
+          </h2>
+        </div>
+        <p>
+          OpsReplay is being built to connect those pieces, so your investigation starts with the
+          sequence of events.
+        </p>
+      </div>
+      <div class="feature-grid">
+        <Card class="feature-card feature-wide">
+          <div class="feature-icon">
+            <Clock3 size={22} />
+          </div>
+          <h3>One operational timeline.</h3>
+          <p>
+            Put code changes, deployments, and production signals in the same chronological record.
+          </p>
+          <div class="mini-timeline" aria-hidden="true">
+            <div>
+              <span class="mini-time">09:41</span>
+              <span class="mini-node">
+                <GitPullRequest size={14} />
+              </span>
+              <span>Pull request merged</span>
+              <span class="mini-tag">#842</span>
+            </div>
+            <div>
+              <span class="mini-time">09:47</span>
+              <span class="mini-node mint">
+                <Rocket size={14} />
+              </span>
+              <span>Deployed to production</span>
+              <span class="mini-tag mint">7ac04e2</span>
+            </div>
+            <div>
+              <span class="mini-time">09:52</span>
+              <span class="mini-node amber">
+                <Activity size={14} />
+              </span>
+              <span>Errors begin increasing</span>
+              <span class="mini-tag amber">5xx</span>
+            </div>
+          </div>
+        </Card>
+        <Card class="feature-card feature-change">
+          <div class="feature-icon">
+            <GitBranch size={22} />
+          </div>
+          <h3>The change before the signal.</h3>
+          <p>
+            See the commits and deployments that preceded a failure. Know where to start looking.
+          </p>
+          <div
+            class="change-diagram"
+            aria-label="Example: five minutes from deployment to first errors"
+          >
+            <div>
+              <Rocket size={17} />
+              <span>Deployment</span>
+              <code>09:47</code>
+            </div>
+            <div class="change-gap">
+              <span>5 min</span>
+              <i></i>
+            </div>
+            <div>
+              <Activity size={17} />
+              <span>First errors</span>
+              <code>09:52</code>
+            </div>
+          </div>
+        </Card>
+        <Card class="feature-card">
+          <div class="feature-icon">
+            <Link2 size={22} />
+          </div>
+          <h3>Evidence you can follow.</h3>
+          <p>
+            Keep the investigation tied to source events. Follow a reference back to the record
+            behind it.
+          </p>
+          <div class="feature-bottom">
+            <span class="reference-chip">
+              <Link2 size={12} /> event_0248
+            </span>
+            <ArrowRight size={14} />
+            <span class="mono">source record</span>
+          </div>
+        </Card>
+        <Card class="feature-card">
+          <div class="feature-icon">
+            <FileCheck size={22} />
+          </div>
+          <h3>Postmortems with receipts.</h3>
+          <p>
+            Draft the report from collected evidence, with traceable references and room for human
+            judgment.
+          </p>
+          <div class="feature-bottom">
+            <span class="subtle-badge">PLANNED</span>
+            <span>Grounded drafts, reviewed by you.</span>
+          </div>
+        </Card>
+        <Card class="feature-card">
+          <div class="feature-icon">
+            <Layers size={22} />
+          </div>
+          <h3>Built for the smaller team.</h3>
+          <p>
+            A focused release and incident workflow, without a sprawling enterprise incident
+            platform.
+          </p>
+          <div class="feature-bottom">
+            <Check size={14} class="mint" />
+            <span>Less overhead. More context.</span>
+          </div>
+        </Card>
+      </div>
+    </section>
+
+    <section class="workflow-section" id="how-it-works" aria-labelledby="workflow-title">
+      <div class="container">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">FROM CHANGE TO UNDERSTANDING</p>
+            <h2 id="workflow-title">
+              A continuous record.
+              <br />
+              <span>A clearer investigation.</span>
+            </h2>
+          </div>
+          <p>
+            The workflow we’re building: capture the events first, then connect the incident to the
+            evidence.
+          </p>
+        </div>
+        <ol class="workflow-grid">
+          {steps.map((step) => (
+            <li>
+              <div class="step-top">
+                <span class="step-icon">
+                  <step.icon size={23} />
+                </span>
+                <span class="step-line"></span>
+                <span class="step-number">{step.number}</span>
+              </div>
+              <h3>{step.title}</h3>
+              <p>{step.text}</p>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </section>
+
+    <section
+      class="section container postmortem-section"
+      id="postmortems"
+      aria-labelledby="postmortem-title"
+    >
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">
+            EVIDENCE FIRST. AI SECOND. <span class="subtle-badge">PLANNED</span>
+          </p>
+          <h2 id="postmortem-title">
+            Every claim should
+            <br />
+            <span>have a way back.</span>
+          </h2>
+        </div>
+        <p>
+          The planned postmortem assistant draws exclusively from the collected incident evidence. A
+          referenced draft to review, with uncertainty kept visible.
+        </p>
+      </div>
+      <Postmortem />
+      <div class="postmortem-caption">
+        <span>
+          <Link2 size={15} /> Select a numbered reference to see its source.
+        </span>
+        <span>Illustrative draft · No live AI calls</span>
+      </div>
+    </section>
+
+    <section
+      class="section container integrations-section"
+      id="integrations"
+      aria-labelledby="integrations-title"
+    >
+      <div class="integrations-intro">
+        <p class="eyebrow">MEET YOUR TOOLS WHERE THEY ARE</p>
+        <h2 id="integrations-title">
+          Your stack.
+          <br />
+          <span>A shared context.</span>
+        </h2>
+        <p>
+          GitHub is the starting point. More event sources will bring the rest of the production
+          story into view.
+        </p>
+        <a class="text-link" href={repo}>
+          Follow integration development <ArrowUpRight size={15} />
+        </a>
+      </div>
+      <div class="integration-grid">
+        <Card class="github-integration">
+          <div class="integration-icon">
+            <GitFork size={28} />
+          </div>
+          <div>
+            <h3>
+              GitHub <span class="integration-status">IN DEVELOPMENT</span>
+            </h3>
+            <p>App connection, verified webhooks, and push events in the repository timeline.</p>
+          </div>
+          <ArrowUpRight size={16} class="integration-arrow" />
+        </Card>
+        {integrations.map((item) => (
+          <Card class="integration-card">
+            <item.icon size={22} />
+            <h3>{item.title}</h3>
+            <p>{item.description}</p>
+            <span class="upcoming">UPCOMING</span>
+          </Card>
+        ))}
+      </div>
+    </section>
+
+    <section class="engineering-strip container" aria-label="Technical foundation">
+      <div>
+        <Terminal size={21} />
+        <p>
+          Built in the open.
+          <br />
+          <strong>From the event pipeline up.</strong>
+        </p>
+      </div>
+      <p>
+        FastAPI <span>/</span> PostgreSQL <span>/</span> Docker <span>/</span> SQS-compatible queues
+      </p>
+      <a href={repo} aria-label="Explore the OpsReplay source code">
+        Explore the source <ArrowUpRight size={15} />
+      </a>
+    </section>
+
+    <section class="final-cta container" aria-labelledby="cta-title">
+      <div class="cta-orbit" aria-hidden="true">
+        <Logo compact />
+      </div>
+      <p class="eyebrow">PUT THE EVENTS IN ORDER</p>
+      <h2 id="cta-title">
+        Your incident timeline shouldn’t
+        <br /> start after the incident.
+      </h2>
+      <p>
+        Follow OpsReplay as we build a clearer path
+        <br class="desktop-break" /> from production changes to incident understanding.
+      </p>
+      <Button href={repo} external>
+        <GitFork size={17} /> Follow development
+      </Button>
+      <span class="cta-note">Early development. Built for engineers.</span>
+    </section>
+  </main>
+  <footer class="container site-footer">
+    <div>
+      <a href="/" aria-label="OpsReplay home">
+        <Logo />
+      </a>
+      <span>Change. Context. Clarity.</span>
+    </div>
+    <div class="footer-links">
+      <a href="#product">Product</a>
+      <a href={repo}>
+        GitHub <ArrowUpRight size={12} />
+      </a>
+      <span>© {new Date().getFullYear()} OpsReplay</span>
+    </div>
+  </footer>
+</Layout>

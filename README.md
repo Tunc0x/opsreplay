@@ -12,7 +12,7 @@ It brings software-development and production activity into one chronological ti
 
 The goal is to make it easier to understand **what changed shortly before something broke in production**.
 
-After an incident, OpsReplay can also generate a draft postmortem grounded in the collected incident evidence, with references back to the underlying timeline events.
+OpsReplay is also being developed to generate postmortem drafts grounded in the collected incident evidence, with references back to the underlying timeline events.
 
 ## Landing page
 
@@ -45,4 +45,8 @@ The main application code and landing page live in this repository.
 
 ```text
 apps/       Application services
+backend/    Core backend package
+infra/      Infrastructure configuration
+docs/       Project documentation
 website/    Public OpsReplay landing page
+```

@@ -19,7 +19,10 @@ from app.messaging.sqs import (
 )
 from app.models.timeline_event import TimelineEvent
 from app.models.webhook_delivery import WebhookDelivery
-from app.processing.github import extract_github_push_ref
+from app.processing.github import (
+    extract_github_deployment_status,
+    extract_github_push_ref,
+)
 
 
 FAILURE_SLEEP_SECONDS = 2
@@ -88,6 +91,26 @@ def process_webhook_delivery(
                     source="github",
                     event_type="push",
                     summary=f"Push to {ref}",
+                    observed_at=delivery.received_at,
+                )
+            )
+        # normalize deployment events
+        elif delivery.event == "deployment_status":
+            if delivery.repository_id is None:
+                raise WebhookWorkerError(
+                    "A GitHub deployment_status delivery requires a linked Repository."
+                )
+            # extract the state and environment
+            state, environment = extract_github_deployment_status(
+                delivery.payload_body
+            )
+            session.add(
+                TimelineEvent(
+                    repository_id=delivery.repository_id,
+                    webhook_delivery_id=delivery.id,
+                    source="github",
+                    event_type="deployment_status",
+                    summary=f"Deployment to {environment}: {state}",
                     observed_at=delivery.received_at,
                 )
             )

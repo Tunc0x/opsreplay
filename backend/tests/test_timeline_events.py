@@ -177,3 +177,170 @@ def test_malformed_push_is_not_marked_processed(
         )
     )
     assert timeline_event is None
+
+
+def create_deployment_status_delivery(
+    db_session: Session,
+    repository_id: int,
+    delivery_id: str,
+    received_at: datetime,
+    payload: dict[str, object],
+) -> WebhookDelivery:
+    delivery = WebhookDelivery(
+        delivery_id=delivery_id,
+        event="deployment_status",
+        repository_id=repository_id,
+        payload_body=json.dumps(payload).encode("utf-8"),
+        received_at=received_at,
+    )
+    db_session.add(delivery)
+    db_session.commit()
+    db_session.refresh(delivery)
+    return delivery
+
+
+def test_github_deployment_status_creates_timeline_event(
+    db_session: Session,
+) -> None:
+    repository = create_repository(db_session, "deployment-api")
+    received_at = datetime(2026, 9, 27, 10, 0, tzinfo=timezone.utc)
+    worker_time = datetime(2026, 9, 27, 10, 1, tzinfo=timezone.utc)
+    delivery = create_deployment_status_delivery(
+        db_session,
+        repository.id,
+        "timeline-deployment-status-001",
+        received_at,
+        {
+            "action": "created",
+            "deployment": {"id": 12345},
+            "deployment_status": {
+                "state": "success",
+                "environment": "production",
+            },
+        },
+    )
+
+    processed = process_webhook_delivery(
+        db_session,
+        delivery.id,
+        now=lambda: worker_time,
+    )
+
+    assert processed is True
+    assert delivery.processed_at == worker_time
+    timeline_events = list(
+        db_session.scalars(
+            select(TimelineEvent).where(
+                TimelineEvent.webhook_delivery_id == delivery.id
+            )
+        )
+    )
+    assert len(timeline_events) == 1
+    timeline_event = timeline_events[0]
+    assert timeline_event.repository_id == repository.id
+    assert timeline_event.source == "github"
+    assert timeline_event.event_type == "deployment_status"
+    assert timeline_event.summary == "Deployment to production: success"
+    assert timeline_event.observed_at == delivery.received_at
+
+
+def test_deployment_status_environment_and_state_are_normalized(
+    db_session: Session,
+) -> None:
+    repository = create_repository(db_session, "staging-api")
+    delivery = create_deployment_status_delivery(
+        db_session,
+        repository.id,
+        "timeline-deployment-status-002",
+        datetime(2026, 9, 27, 11, 0, tzinfo=timezone.utc),
+        {
+            "action": "created",
+            "deployment": {"id": 23456},
+            "deployment_status": {
+                "state": "in_progress",
+                "environment": "staging",
+            },
+        },
+    )
+
+    process_webhook_delivery(db_session, delivery.id)
+
+    timeline_event = db_session.scalar(
+        select(TimelineEvent).where(
+            TimelineEvent.webhook_delivery_id == delivery.id
+        )
+    )
+    assert timeline_event is not None
+    assert timeline_event.summary == "Deployment to staging: in_progress"
+
+
+def test_malformed_deployment_status_is_not_marked_processed(
+    db_session: Session,
+) -> None:
+    repository = create_repository(db_session, "malformed-deployment")
+    delivery = create_deployment_status_delivery(
+        db_session,
+        repository.id,
+        "timeline-deployment-status-malformed-001",
+        datetime(2026, 9, 27, 12, 0, tzinfo=timezone.utc),
+        {
+            "action": "created",
+            "deployment": {"id": 34567},
+            "deployment_status": {"state": "success"},
+        },
+    )
+
+    with pytest.raises(GitHubPushProcessingError, match="environment"):
+        process_webhook_delivery(db_session, delivery.id)
+
+    assert delivery.processed_at is None
+    timeline_event = db_session.scalar(
+        select(TimelineEvent).where(
+            TimelineEvent.webhook_delivery_id == delivery.id
+        )
+    )
+    assert timeline_event is None
+
+
+def test_processing_same_deployment_status_again_does_not_duplicate_event(
+    db_session: Session,
+) -> None:
+    repository = create_repository(db_session, "idempotent-deployment")
+    first_worker_time = datetime(2026, 9, 27, 13, 1, tzinfo=timezone.utc)
+    delivery = create_deployment_status_delivery(
+        db_session,
+        repository.id,
+        "timeline-deployment-status-003",
+        datetime(2026, 9, 27, 13, 0, tzinfo=timezone.utc),
+        {
+            "action": "created",
+            "deployment": {"id": 45678},
+            "deployment_status": {
+                "state": "success",
+                "environment": "production",
+            },
+        },
+    )
+    process_webhook_delivery(
+        db_session,
+        delivery.id,
+        now=lambda: first_worker_time,
+    )
+    original_processed_at = delivery.processed_at
+
+    processed_again = process_webhook_delivery(
+        db_session,
+        delivery.id,
+        now=lambda: datetime(2026, 9, 27, 13, 2, tzinfo=timezone.utc),
+    )
+
+    assert processed_again is False
+    assert delivery.processed_at == original_processed_at
+    timeline_events = list(
+        db_session.scalars(
+            select(TimelineEvent).where(
+                TimelineEvent.webhook_delivery_id == delivery.id
+            )
+        )
+    )
+    assert len(timeline_events) == 1

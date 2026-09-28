@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.database import Base, get_db_session
 from app.main import app
 from app.models import (  # noqa: F401
+    AlertDelivery,
     GitHubInstallation,
     Organization,
     Repository,

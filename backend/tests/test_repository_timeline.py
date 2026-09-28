@@ -99,6 +99,7 @@ def test_repository_timeline_returns_events_in_chronological_order_with_evidence
         ) == expected_event.observed_at
         assert event["created_at"] is not None
         assert event["evidence"] == {
+            "kind": "github_webhook",
             "webhook_delivery_id": expected_delivery.id,
             "github_delivery_id": expected_delivery.delivery_id,
         }

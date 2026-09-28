@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import (
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Integer,
@@ -20,6 +21,15 @@ class TimelineEvent(Base):
             "webhook_delivery_id",
             name="uq_timeline_events_webhook_delivery_id",
         ),
+        UniqueConstraint(
+            "alert_delivery_id",
+            name="uq_timeline_events_alert_delivery_id",
+        ),
+        CheckConstraint(
+            "(webhook_delivery_id IS NOT NULL AND alert_delivery_id IS NULL) "
+            "OR (webhook_delivery_id IS NULL AND alert_delivery_id IS NOT NULL)",
+            name="ck_timeline_events_exactly_one_evidence_source",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -31,7 +41,7 @@ class TimelineEvent(Base):
         ),
         nullable=False,
     )
-    webhook_delivery_id: Mapped[int] = mapped_column(
+    webhook_delivery_id: Mapped[int | None] = mapped_column(
         Integer,
         ForeignKey(
             "webhook_deliveries.id",
@@ -40,7 +50,15 @@ class TimelineEvent(Base):
                 "webhook_deliveries"
             ),
         ),
-        nullable=False,
+        nullable=True,
+    )
+    alert_delivery_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey(
+            "alert_deliveries.id",
+            name="fk_timeline_events_alert_delivery_id_alert_deliveries",
+        ),
+        nullable=True,
     )
     source: Mapped[str] = mapped_column(String(50), nullable=False)
     event_type: Mapped[str] = mapped_column(String(50), nullable=False)

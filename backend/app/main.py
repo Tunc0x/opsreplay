@@ -3,17 +3,24 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db_session, is_database_healthy
+from app.models.alert_delivery import AlertDelivery
 from app.models.organization import Organization
 from app.models.repository import Repository
 from app.models.timeline_event import TimelineEvent
 from app.models.webhook_delivery import WebhookDelivery
+from app.routers.alert_webhook import router as alert_webhook_router
 from app.routers.github_webhook import router as github_webhook_router
 from app.schemas.organization import OrganizationCreate, OrganizationRead
 from app.schemas.repository import RepositoryCreate, RepositoryRead
-from app.schemas.timeline_event import TimelineEvidenceRead, TimelineEventRead
+from app.schemas.timeline_event import (
+    AlertWebhookEvidenceRead,
+    GitHubWebhookEvidenceRead,
+    TimelineEventRead,
+)
 
 
 app = FastAPI(title="OpsReplay API")
+app.include_router(alert_webhook_router)
 app.include_router(github_webhook_router)
 
 
@@ -156,32 +163,63 @@ def get_repository_timeline(
     if repository is None:
         raise HTTPException(status_code=404, detail="Repository not found")
 
-    # Find TimelineEvents for the specific repository. Join each TimelineEvent to its WebhookDelivery
-    # and then sort events chronologically
-    
     statement = (
-        select(TimelineEvent, WebhookDelivery.delivery_id)
-        .join(
+        select(
+            TimelineEvent,
+            WebhookDelivery.delivery_id,
+            AlertDelivery.external_event_id,
+        )
+        .outerjoin(
             WebhookDelivery,
             TimelineEvent.webhook_delivery_id == WebhookDelivery.id,
+        )
+        .outerjoin(
+            AlertDelivery,
+            TimelineEvent.alert_delivery_id == AlertDelivery.id,
         )
         .where(TimelineEvent.repository_id == repository_id)
         .order_by(TimelineEvent.observed_at.asc(), TimelineEvent.id.asc())
     )
-    return [
-        TimelineEventRead(
-            id=event.id,
-            repository_id=event.repository_id,
-            source=event.source,
-            event_type=event.event_type,
-            summary=event.summary,
-            observed_at=event.observed_at,
-            created_at=event.created_at,
-            evidence=TimelineEvidenceRead(
+
+    timeline = []
+    for event, github_delivery_id, external_event_id in session.execute(
+        statement
+    ):
+        if (
+            event.webhook_delivery_id is not None
+            and event.alert_delivery_id is None
+            and github_delivery_id is not None
+        ):
+            evidence = GitHubWebhookEvidenceRead(
+                kind="github_webhook",
                 webhook_delivery_id=event.webhook_delivery_id,
                 github_delivery_id=github_delivery_id,
-            ),
+            )
+        elif (
+            event.webhook_delivery_id is None
+            and event.alert_delivery_id is not None
+            and external_event_id is not None
+        ):
+            evidence = AlertWebhookEvidenceRead(
+                kind="alert_webhook",
+                alert_delivery_id=event.alert_delivery_id,
+                external_event_id=external_event_id,
+            )
+        else:
+            raise RuntimeError(
+                f"TimelineEvent {event.id} has invalid evidence provenance."
+            )
+
+        timeline.append(
+            TimelineEventRead(
+                id=event.id,
+                repository_id=event.repository_id,
+                source=event.source,
+                event_type=event.event_type,
+                summary=event.summary,
+                observed_at=event.observed_at,
+                created_at=event.created_at,
+                evidence=evidence,
+            )
         )
-        # Convert each database result into TimelineEventRead
-        for event, github_delivery_id in session.execute(statement)
-    ]
+    return timeline

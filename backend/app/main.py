@@ -1,4 +1,7 @@
-from fastapi import Depends, FastAPI, HTTPException
+from datetime import datetime, timedelta
+from typing import Annotated
+
+from fastapi import Depends, FastAPI, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -10,6 +13,7 @@ from app.models.timeline_event import TimelineEvent
 from app.models.webhook_delivery import WebhookDelivery
 from app.routers.alert_webhook import router as alert_webhook_router
 from app.routers.github_webhook import router as github_webhook_router
+from app.schemas.investigation import InvestigationContextRead
 from app.schemas.organization import OrganizationCreate, OrganizationRead
 from app.schemas.repository import RepositoryCreate, RepositoryRead
 from app.schemas.timeline_event import (
@@ -138,31 +142,13 @@ def get_repository_from_organization(
 
     return repository
 
-
-@app.get(
-    "/organizations/{organization_id}/repositories/{repository_id}/timeline",
-    response_model=list[TimelineEventRead],
-)
-def get_repository_timeline(
-    organization_id: int,
+# read timeline event from repository id and optionally set a timeframe
+def _read_timeline_events(
+    session: Session,
     repository_id: int,
-    session: Session = Depends(get_db_session),
+    window_start: datetime | None = None,
+    window_end: datetime | None = None,
 ) -> list[TimelineEventRead]:
-    # confirm organization
-    organization = session.get(Organization, organization_id)
-    if organization is None:
-        raise HTTPException(status_code=404, detail="Organization not found")
-
-    # proof provenance
-    repository = session.scalar(
-        select(Repository).where(
-            Repository.id == repository_id,
-            Repository.organization_id == organization_id,
-        )
-    )
-    if repository is None:
-        raise HTTPException(status_code=404, detail="Repository not found")
-
     statement = (
         select(
             TimelineEvent,
@@ -177,8 +163,15 @@ def get_repository_timeline(
             AlertDelivery,
             TimelineEvent.alert_delivery_id == AlertDelivery.id,
         )
+        # return timeline events belonging to this repository
         .where(TimelineEvent.repository_id == repository_id)
-        .order_by(TimelineEvent.observed_at.asc(), TimelineEvent.id.asc())
+    )
+    if window_start is not None:
+        statement = statement.where(TimelineEvent.observed_at >= window_start)
+    if window_end is not None:
+        statement = statement.where(TimelineEvent.observed_at <= window_end)
+    statement = statement.order_by(
+        TimelineEvent.observed_at.asc(), TimelineEvent.id.asc()
     )
 
     timeline = []
@@ -223,3 +216,85 @@ def get_repository_timeline(
             )
         )
     return timeline
+
+# returns the whole timeline for repository X
+@app.get(
+    "/organizations/{organization_id}/repositories/{repository_id}/timeline",
+    response_model=list[TimelineEventRead],
+)
+def get_repository_timeline(
+    organization_id: int,
+    repository_id: int,
+    session: Session = Depends(get_db_session),
+) -> list[TimelineEventRead]:
+    organization = session.get(Organization, organization_id)
+    if organization is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    repository = session.scalar(
+        select(Repository).where(
+            Repository.id == repository_id,
+            Repository.organization_id == organization_id,
+        )
+    )
+    if repository is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    return _read_timeline_events(session, repository_id)
+
+# Returns timeline events around an alert
+@app.get(
+    "/organizations/{organization_id}/repositories/{repository_id}/"
+    "timeline/{timeline_event_id}/context",
+    response_model=InvestigationContextRead,
+)
+def get_investigation_context(
+    organization_id: int,
+    repository_id: int,
+    timeline_event_id: int,
+    lookback_minutes: Annotated[int, Query(ge=0, le=1440)] = 30, # restrict values to between 0 and 1440 minutes
+    lookahead_minutes: Annotated[int, Query(ge=0, le=1440)] = 30,
+    session: Session = Depends(get_db_session),
+) -> InvestigationContextRead:
+    # check if organization exists
+    organization = session.get(Organization, organization_id)
+    if organization is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    # check if repository actually belongs to organization
+    repository = session.scalar(
+        select(Repository).where(
+            Repository.id == repository_id,
+            Repository.organization_id == organization_id,
+        )
+    )
+    if repository is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+
+    trigger = session.get(TimelineEvent, timeline_event_id)
+    # ensure timeline event exists and belongs to the repository and verify that the trigger is an alert
+    if trigger is None or trigger.repository_id != repository_id:
+        raise HTTPException(status_code=404, detail="Timeline event not found")
+    if (
+        trigger.source != "alert"
+        or trigger.event_type != "alert"
+        or trigger.alert_delivery_id is None
+    ):
+        raise HTTPException(status_code=400, detail="Timeline event is not an alert")
+
+    # compute investigation window
+    window_start = trigger.observed_at - timedelta(minutes=lookback_minutes)
+    window_end = trigger.observed_at + timedelta(minutes=lookahead_minutes)
+    return InvestigationContextRead(
+        repository_id=repository_id,
+        trigger_event_id=trigger.id,
+        window_start=window_start,
+        window_end=window_end,
+        events=_read_timeline_events(
+            session,
+            repository_id,
+            window_start=window_start,
+            window_end=window_end,
+        ),
+    )

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -290,6 +290,8 @@ def _build_incident_read(
         trigger_timeline_event_id=incident.trigger_timeline_event_id,
         lookback_minutes=incident.lookback_minutes,
         lookahead_minutes=incident.lookahead_minutes,
+        status=incident.status,
+        resolved_at=incident.resolved_at,
         created_at=incident.created_at,
         context=context,
     )
@@ -447,5 +449,52 @@ def get_incident(
     )
     if incident is None:
         raise HTTPException(status_code=404, detail="Incident not found")
+
+    return _build_incident_read(session, incident)
+
+
+@app.post(
+    "/organizations/{organization_id}/repositories/{repository_id}/"
+    "incidents/{incident_id}/resolve",
+    response_model=IncidentRead,
+)
+def resolve_incident(
+    organization_id: int,
+    repository_id: int,
+    incident_id: int,
+    session: Session = Depends(get_db_session),
+) -> IncidentRead:
+    organization = session.get(Organization, organization_id)
+    if organization is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    repository = session.scalar(
+        select(Repository).where(
+            Repository.id == repository_id,
+            Repository.organization_id == organization_id,
+        )
+    )
+    if repository is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    incident = session.scalar(
+        select(Incident).where(
+            Incident.id == incident_id,
+            Incident.repository_id == repository_id,
+        )
+    )
+    if incident is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    if incident.status == "open":
+        incident.status = "resolved"
+        incident.resolved_at = datetime.now(timezone.utc)
+        session.commit()
+        session.refresh(incident)
+    elif incident.status != "resolved":
+        raise HTTPException(
+            status_code=500,
+            detail="Incident has unsupported status",
+        )
 
     return _build_incident_read(session, incident)

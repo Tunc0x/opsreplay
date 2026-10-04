@@ -296,3 +296,153 @@ def test_incident_from_another_repository_returns_404(
 
     assert response.status_code == 404
     assert response.json() == {"detail": "Incident not found"}
+
+
+def test_new_incident_is_open_and_unresolved(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    organization = create_organization(db_session)
+    repository = create_repository(db_session, organization, "new-incident-api")
+    trigger, _ = add_alert_event(
+        db_session,
+        repository,
+        "incident-new-open-alert-001",
+        TRIGGER_TIME,
+    )
+    db_session.commit()
+
+    response = client.post(
+        f"/organizations/{organization.id}/repositories/{repository.id}/incidents",
+        json={"trigger_timeline_event_id": trigger.id},
+    )
+
+    assert response.status_code == 201
+    result = response.json()
+    assert result["status"] == "open"
+    assert result["resolved_at"] is None
+    db_incident = db_session.scalar(
+        select(Incident).where(
+            Incident.trigger_timeline_event_id == trigger.id
+        )
+    )
+    assert db_incident is not None
+    assert db_incident.status == "open"
+    assert db_incident.resolved_at is None
+
+
+def test_resolve_incident_sets_status_and_resolution_timestamp(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    organization = create_organization(db_session)
+    repository = create_repository(db_session, organization, "resolve-api")
+    trigger, _ = add_alert_event(
+        db_session,
+        repository,
+        "incident-resolve-alert-001",
+        TRIGGER_TIME,
+    )
+    db_session.commit()
+    create_response = client.post(
+        f"/organizations/{organization.id}/repositories/{repository.id}/incidents",
+        json={"trigger_timeline_event_id": trigger.id},
+    )
+    assert create_response.status_code == 201
+    incident_id = create_response.json()["id"]
+
+    response = client.post(
+        f"/organizations/{organization.id}/repositories/{repository.id}/"
+        f"incidents/{incident_id}/resolve"
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["status"] == "resolved"
+    assert result["resolved_at"] is not None
+    assert result["context"]["trigger_event_id"] == trigger.id
+    db_incident = db_session.get(Incident, incident_id)
+    assert db_incident is not None
+    db_session.refresh(db_incident)
+    assert db_incident.status == "resolved"
+    assert db_incident.resolved_at is not None
+    assert db_incident.resolved_at.utcoffset() is not None
+    assert parse_time(result["resolved_at"]) == db_incident.resolved_at
+
+
+def test_resolving_incident_again_is_idempotent(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    organization = create_organization(db_session)
+    repository = create_repository(db_session, organization, "idempotent-api")
+    trigger, _ = add_alert_event(
+        db_session,
+        repository,
+        "incident-idempotent-alert-001",
+        TRIGGER_TIME,
+    )
+    db_session.commit()
+    create_response = client.post(
+        f"/organizations/{organization.id}/repositories/{repository.id}/incidents",
+        json={"trigger_timeline_event_id": trigger.id},
+    )
+    assert create_response.status_code == 201
+    incident_id = create_response.json()["id"]
+    resolve_url = (
+        f"/organizations/{organization.id}/repositories/{repository.id}/"
+        f"incidents/{incident_id}/resolve"
+    )
+
+    first_response = client.post(resolve_url)
+    second_response = client.post(resolve_url)
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    first_result = first_response.json()
+    second_result = second_response.json()
+    assert second_result["status"] == "resolved"
+    assert second_result["resolved_at"] == first_result["resolved_at"]
+    incidents = list(
+        db_session.scalars(
+            select(Incident).where(
+                Incident.trigger_timeline_event_id == trigger.id
+            )
+        )
+    )
+    assert len(incidents) == 1
+
+
+def test_resolve_incident_from_another_repository_returns_404(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    organization = create_organization(db_session)
+    repository_a = create_repository(db_session, organization, "resolve-a")
+    repository_b = create_repository(db_session, organization, "resolve-b")
+    trigger, _ = add_alert_event(
+        db_session,
+        repository_a,
+        "incident-wrong-repository-alert-001",
+        TRIGGER_TIME,
+    )
+    db_session.commit()
+    create_response = client.post(
+        f"/organizations/{organization.id}/repositories/{repository_a.id}/incidents",
+        json={"trigger_timeline_event_id": trigger.id},
+    )
+    assert create_response.status_code == 201
+    incident_id = create_response.json()["id"]
+
+    response = client.post(
+        f"/organizations/{organization.id}/repositories/{repository_b.id}/"
+        f"incidents/{incident_id}/resolve"
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Incident not found"}
+    db_incident = db_session.get(Incident, incident_id)
+    assert db_incident is not None
+    db_session.refresh(db_incident)
+    assert db_incident.status == "open"
+    assert db_incident.resolved_at is None

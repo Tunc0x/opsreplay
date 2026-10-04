@@ -426,6 +426,24 @@ def _command_incident_get(
     _print_result(result)
 
 
+def _command_incident_resolve(
+    args: argparse.Namespace,
+) -> None:
+    url = (
+        f"{args.base_url}"
+        f"/organizations/{args.organization_id}"
+        f"/repositories/{args.repository_id}"
+        f"/incidents/{args.incident_id}/resolve"
+    )
+
+    result = _request_json(
+        "POST",
+        url,
+    )
+
+    _print_result(result)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -686,6 +704,33 @@ def _build_parser() -> argparse.ArgumentParser:
     
     incident_get_parser.set_defaults(
         handler=_command_incident_get
+    )
+
+    incident_resolve_parser = subparsers.add_parser(
+        "incident-resolve",
+        help="Resolve an existing incident.",
+    )
+
+    incident_resolve_parser.add_argument(
+        "--organization-id",
+        type=int,
+        required=True,
+    )
+
+    incident_resolve_parser.add_argument(
+        "--repository-id",
+        type=int,
+        required=True,
+    )
+
+    incident_resolve_parser.add_argument(
+        "--incident-id",
+        type=int,
+        required=True,
+    )
+
+    incident_resolve_parser.set_defaults(
+        handler=_command_incident_resolve
     )
 
     return parser

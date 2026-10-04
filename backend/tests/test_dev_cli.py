@@ -1,7 +1,10 @@
+from pytest import MonkeyPatch
+
+from app.cli import dev
 from app.cli.dev import (
     _build_deployment_status_payload,
-    _build_push_payload,
     _build_incident_payload,
+    _build_push_payload,
     _json_body,
     _sign_body,
 )
@@ -81,3 +84,46 @@ def test_build_incident_payload() -> None:
         "lookback_minutes": 30,
         "lookahead_minutes": 45,
     }
+
+
+def test_incident_resolve_posts_to_resolve_endpoint(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    request_calls: list[tuple[str, str]] = []
+    printed_results: list[object] = []
+    response = {
+        "id": 23,
+        "status": "resolved",
+    }
+
+    def fake_request_json(method: str, url: str) -> object:
+        request_calls.append((method, url))
+        return response
+
+    monkeypatch.setattr(dev, "_request_json", fake_request_json)
+    monkeypatch.setattr(dev, "_print_result", printed_results.append)
+    args = dev._build_parser().parse_args(
+        [
+            "--base-url",
+            "http://opsreplay.test:8000",
+            "incident-resolve",
+            "--organization-id",
+            "4",
+            "--repository-id",
+            "12",
+            "--incident-id",
+            "23",
+        ]
+    )
+
+    assert args.handler is dev._command_incident_resolve
+    args.handler(args)
+
+    assert request_calls == [
+        (
+            "POST",
+            "http://opsreplay.test:8000/organizations/4/repositories/12/"
+            "incidents/23/resolve",
+        )
+    ]
+    assert printed_results == [response]

@@ -19,5 +19,7 @@ class IncidentRead(BaseModel):
     trigger_timeline_event_id: int
     lookback_minutes: int
     lookahead_minutes: int
+    status: str
+    resolved_at: datetime | None
     created_at: datetime
     context: InvestigationContextRead

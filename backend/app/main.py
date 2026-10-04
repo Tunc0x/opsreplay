@@ -3,16 +3,19 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db_session, is_database_healthy
 from app.models.alert_delivery import AlertDelivery
+from app.models.incident import Incident
 from app.models.organization import Organization
 from app.models.repository import Repository
 from app.models.timeline_event import TimelineEvent
 from app.models.webhook_delivery import WebhookDelivery
 from app.routers.alert_webhook import router as alert_webhook_router
 from app.routers.github_webhook import router as github_webhook_router
+from app.schemas.incident import IncidentCreate, IncidentRead
 from app.schemas.investigation import InvestigationContextRead
 from app.schemas.organization import OrganizationCreate, OrganizationRead
 from app.schemas.repository import RepositoryCreate, RepositoryRead
@@ -26,6 +29,8 @@ from app.schemas.timeline_event import (
 app = FastAPI(title="OpsReplay API")
 app.include_router(alert_webhook_router)
 app.include_router(github_webhook_router)
+
+INCIDENT_TRIGGER_UNIQUE_CONSTRAINT = "uq_incidents_trigger_timeline_event_id"
 
 
 @app.get("/health")
@@ -217,6 +222,78 @@ def _read_timeline_events(
         )
     return timeline
 
+
+def _get_alert_trigger(
+    session: Session,
+    repository_id: int,
+    timeline_event_id: int,
+) -> TimelineEvent:
+    trigger = session.scalar(
+        select(TimelineEvent).where(
+            TimelineEvent.id == timeline_event_id,
+            TimelineEvent.repository_id == repository_id,
+        )
+    )
+    if trigger is None:
+        raise HTTPException(status_code=404, detail="Timeline event not found")
+    if (
+        trigger.source != "alert"
+        or trigger.event_type != "alert"
+        or trigger.alert_delivery_id is None
+    ):
+        raise HTTPException(status_code=400, detail="Timeline event is not an alert")
+    return trigger
+
+
+def _build_investigation_context(
+    session: Session,
+    repository_id: int,
+    trigger: TimelineEvent,
+    lookback_minutes: int,
+    lookahead_minutes: int,
+) -> InvestigationContextRead:
+    window_start = trigger.observed_at - timedelta(minutes=lookback_minutes)
+    window_end = trigger.observed_at + timedelta(minutes=lookahead_minutes)
+    return InvestigationContextRead(
+        repository_id=repository_id,
+        trigger_event_id=trigger.id,
+        window_start=window_start,
+        window_end=window_end,
+        events=_read_timeline_events(
+            session,
+            repository_id,
+            window_start=window_start,
+            window_end=window_end,
+        ),
+    )
+
+
+def _build_incident_read(
+    session: Session,
+    incident: Incident,
+) -> IncidentRead:
+    trigger = _get_alert_trigger(
+        session,
+        incident.repository_id,
+        incident.trigger_timeline_event_id,
+    )
+    context = _build_investigation_context(
+        session,
+        incident.repository_id,
+        trigger,
+        incident.lookback_minutes,
+        incident.lookahead_minutes,
+    )
+    return IncidentRead(
+        id=incident.id,
+        repository_id=incident.repository_id,
+        trigger_timeline_event_id=incident.trigger_timeline_event_id,
+        lookback_minutes=incident.lookback_minutes,
+        lookahead_minutes=incident.lookahead_minutes,
+        created_at=incident.created_at,
+        context=context,
+    )
+
 # returns the whole timeline for repository X
 @app.get(
     "/organizations/{organization_id}/repositories/{repository_id}/timeline",
@@ -272,29 +349,103 @@ def get_investigation_context(
         raise HTTPException(status_code=404, detail="Repository not found")
 
 
-    trigger = session.get(TimelineEvent, timeline_event_id)
-    # ensure timeline event exists and belongs to the repository and verify that the trigger is an alert
-    if trigger is None or trigger.repository_id != repository_id:
-        raise HTTPException(status_code=404, detail="Timeline event not found")
-    if (
-        trigger.source != "alert"
-        or trigger.event_type != "alert"
-        or trigger.alert_delivery_id is None
-    ):
-        raise HTTPException(status_code=400, detail="Timeline event is not an alert")
-
-    # compute investigation window
-    window_start = trigger.observed_at - timedelta(minutes=lookback_minutes)
-    window_end = trigger.observed_at + timedelta(minutes=lookahead_minutes)
-    return InvestigationContextRead(
-        repository_id=repository_id,
-        trigger_event_id=trigger.id,
-        window_start=window_start,
-        window_end=window_end,
-        events=_read_timeline_events(
-            session,
-            repository_id,
-            window_start=window_start,
-            window_end=window_end,
-        ),
+    trigger = _get_alert_trigger(session, repository_id, timeline_event_id)
+    return _build_investigation_context(
+        session,
+        repository_id,
+        trigger,
+        lookback_minutes,
+        lookahead_minutes,
     )
+
+
+@app.post(
+    "/organizations/{organization_id}/repositories/{repository_id}/incidents",
+    response_model=IncidentRead,
+    status_code=201,
+)
+def create_incident(
+    organization_id: int,
+    repository_id: int,
+    incident: IncidentCreate,
+    session: Session = Depends(get_db_session),
+) -> IncidentRead:
+    organization = session.get(Organization, organization_id)
+    if organization is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    repository = session.scalar(
+        select(Repository).where(
+            Repository.id == repository_id,
+            Repository.organization_id == organization_id,
+        )
+    )
+    if repository is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    trigger = _get_alert_trigger(
+        session,
+        repository_id,
+        incident.trigger_timeline_event_id,
+    )
+    db_incident = Incident(
+        repository_id=repository_id,
+        trigger_timeline_event_id=trigger.id,
+        lookback_minutes=incident.lookback_minutes,
+        lookahead_minutes=incident.lookahead_minutes,
+    )
+    session.add(db_incident)
+    try:
+        session.commit()
+        session.refresh(db_incident)
+    except IntegrityError as error:
+        session.rollback()
+        constraint_name = getattr(
+            getattr(error.orig, "diag", None),
+            "constraint_name",
+            None,
+        )
+        if constraint_name != INCIDENT_TRIGGER_UNIQUE_CONSTRAINT:
+            raise
+        raise HTTPException(
+            status_code=409,
+            detail="Incident already exists for this alert",
+        ) from error
+
+    return _build_incident_read(session, db_incident)
+
+
+@app.get(
+    "/organizations/{organization_id}/repositories/{repository_id}/"
+    "incidents/{incident_id}",
+    response_model=IncidentRead,
+)
+def get_incident(
+    organization_id: int,
+    repository_id: int,
+    incident_id: int,
+    session: Session = Depends(get_db_session),
+) -> IncidentRead:
+    organization = session.get(Organization, organization_id)
+    if organization is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    repository = session.scalar(
+        select(Repository).where(
+            Repository.id == repository_id,
+            Repository.organization_id == organization_id,
+        )
+    )
+    if repository is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    incident = session.scalar(
+        select(Incident).where(
+            Incident.id == incident_id,
+            Incident.repository_id == repository_id,
+        )
+    )
+    if incident is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    return _build_incident_read(session, incident)

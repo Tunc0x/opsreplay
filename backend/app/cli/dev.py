@@ -279,6 +279,18 @@ def _build_alert_payload(
         "observed_at": observed_at,
     }
 
+def _build_incident_payload(
+    trigger_timeline_event_id: int,
+    lookback_minutes: int,
+    lookahead_minutes: int
+) -> dict[str, object]:
+    return {
+        "trigger_timeline_event_id": trigger_timeline_event_id,
+        "lookback_minutes": lookback_minutes,
+        "lookahead_minutes": lookahead_minutes,
+       
+    }
+
 
 def _command_alert(
     args: argparse.Namespace,
@@ -371,6 +383,47 @@ def _command_context(
 
     _print_result(result)
 
+def _command_incident_create(
+        args: argparse.Namespace
+
+) -> None:
+    
+    payload = _build_incident_payload(
+            args.trigger_event_id,
+            args.lookback,
+            args.lookahead,
+            
+        )
+    
+    body = _json_body(payload)
+    
+    result = _request_json(
+        "POST",
+        f"{args.base_url}/organizations/{args.organization_id}/repositories/{args.repository_id}/incidents",
+        body=body,
+        headers={
+            "Content-Type": "application/json",     
+        },)
+
+    _print_result(result)
+    
+
+def _command_incident_get(
+    args: argparse.Namespace,
+) -> None:
+    url = (
+        f"{args.base_url}"
+        f"/organizations/{args.organization_id}"
+        f"/repositories/{args.repository_id}"
+        f"/incidents/{args.incident_id}"
+    )
+
+    result = _request_json(
+        "GET",
+        url,
+    )
+
+    _print_result(result)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -565,6 +618,74 @@ def _build_parser() -> argparse.ArgumentParser:
 
     context_parser.set_defaults(
         handler=_command_context
+    )
+
+    # incident create parser
+    incident_create_parser = subparsers.add_parser(
+        "incident",
+        help="Send a fake incident",
+    )
+    
+    incident_create_parser.add_argument(
+        "--organization-id",
+        type=int,
+        required=True,
+    )
+    
+    incident_create_parser.add_argument(
+        "--repository-id",
+        type=int,
+        required=True,
+    )
+    
+    incident_create_parser.add_argument(
+        "--trigger-event-id",
+        type=int,
+        required=True,
+    )
+    
+    incident_create_parser.add_argument(
+        "--lookback",
+        type=int,
+        default=30,
+    )
+    
+    incident_create_parser.add_argument(
+        "--lookahead",
+        type=int,
+        default=30,
+    )
+    
+    incident_create_parser.set_defaults(
+        handler=_command_incident_create
+    )
+
+    # incident get parser
+    incident_get_parser = subparsers.add_parser(
+        "incident-get",
+        help="Read an existing incident.",
+    )
+    
+    incident_get_parser.add_argument(
+        "--organization-id",
+        type=int,
+        required=True,
+    )
+    
+    incident_get_parser.add_argument(
+        "--repository-id",
+        type=int,
+        required=True,
+    )
+    
+    incident_get_parser.add_argument(
+        "--incident-id",
+        type=int,
+        required=True,
+    )
+    
+    incident_get_parser.set_defaults(
+        handler=_command_incident_get
     )
 
     return parser

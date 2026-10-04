@@ -1,6 +1,7 @@
 from app.cli.dev import (
     _build_deployment_status_payload,
     _build_push_payload,
+    _build_incident_payload,
     _json_body,
     _sign_body,
 )
@@ -66,4 +67,17 @@ def test_build_deployment_status_payload() -> None:
         "repository": {
             "id": 12345,
         },
+    }
+
+def test_build_incident_payload() -> None:
+    payload = _build_incident_payload(
+        36,
+        30,
+        45,
+    )
+
+    assert payload == {
+        "trigger_timeline_event_id": 36,
+        "lookback_minutes": 30,
+        "lookahead_minutes": 45,
     }

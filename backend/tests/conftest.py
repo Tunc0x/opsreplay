@@ -13,6 +13,7 @@ from app.main import app
 from app.models import (  # noqa: F401
     AlertDelivery,
     GitHubInstallation,
+    Incident,
     Organization,
     Repository,
     TimelineEvent,

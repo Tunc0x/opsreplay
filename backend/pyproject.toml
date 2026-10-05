@@ -7,6 +7,7 @@ dependencies = [
     "boto3>=1.43.97",
     "cryptography>=50.0.1",
     "fastapi[standard]>=0.141.1",
+    "openai>=3.24.0",
     "psycopg[binary]>=3.3.4",
     "pyjwt>=2.13.0",
     "sqlalchemy>=2.0.52",

@@ -11,6 +11,8 @@ services:
       ALERT_WEBHOOK_SECRET: "${ALERT_WEBHOOK_SECRET}"
       GITHUB_APP_CLIENT_ID: "${GITHUB_APP_CLIENT_ID}"
       GITHUB_APP_PRIVATE_KEY_PATH: "/run/secrets/opsreplay/github-app-private-key.pem"
+      OPENAI_API_KEY: "${OPENAI_API_KEY}"
+      OPENAI_POSTMORTEM_MODEL: "${OPENAI_POSTMORTEM_MODEL}"
     volumes:
       - ./.secrets:/run/secrets/opsreplay:ro
     depends_on:

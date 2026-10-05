@@ -127,3 +127,49 @@ def test_incident_resolve_posts_to_resolve_endpoint(
         )
     ]
     assert printed_results == [response]
+
+
+def test_incident_postmortem_draft_posts_to_generation_endpoint(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    request_calls: list[tuple[str, str, float]] = []
+    printed_results: list[object] = []
+    response = {
+        "incident_id": 23,
+        "model": "gpt-6-luna",
+        "draft": {},
+        "evidence": [],
+    }
+
+    def fake_request_json(method: str, url: str, *, timeout: float = 10,) -> object:
+        request_calls.append((method, url, timeout))
+        return response
+
+    monkeypatch.setattr(dev, "_request_json", fake_request_json)
+    monkeypatch.setattr(dev, "_print_result", printed_results.append)
+    args = dev._build_parser().parse_args(
+        [
+            "--base-url",
+            "http://opsreplay.test:8000",
+            "incident-postmortem-draft",
+            "--organization-id",
+            "4",
+            "--repository-id",
+            "12",
+            "--incident-id",
+            "23",
+        ]
+    )
+
+    assert args.handler is dev._command_incident_postmortem_draft
+    args.handler(args)
+
+    assert request_calls == [
+        (
+            "POST",
+            "http://opsreplay.test:8000/organizations/4/repositories/12/"
+            "incidents/23/postmortem-draft",
+            60
+        )
+    ]
+    assert printed_results == [response]

@@ -7,6 +7,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db_session, is_database_healthy
+from app.llm.postmortem import (
+    PostmortemConfigurationError,
+    PostmortemGenerationError,
+    PostmortemGroundingError,
+    generate_postmortem_draft,
+    validate_postmortem_grounding,
+)
 from app.models.alert_delivery import AlertDelivery
 from app.models.incident import Incident
 from app.models.organization import Organization
@@ -18,6 +25,7 @@ from app.routers.github_webhook import router as github_webhook_router
 from app.schemas.incident import IncidentCreate, IncidentRead
 from app.schemas.investigation import InvestigationContextRead
 from app.schemas.organization import OrganizationCreate, OrganizationRead
+from app.schemas.postmortem import PostmortemDraftRead
 from app.schemas.repository import RepositoryCreate, RepositoryRead
 from app.schemas.timeline_event import (
     AlertWebhookEvidenceRead,
@@ -498,3 +506,76 @@ def resolve_incident(
         )
 
     return _build_incident_read(session, incident)
+
+
+@app.post(
+    "/organizations/{organization_id}/repositories/{repository_id}/"
+    "incidents/{incident_id}/postmortem-draft",
+    response_model=PostmortemDraftRead,
+)
+def generate_incident_postmortem_draft(
+    organization_id: int,
+    repository_id: int,
+    incident_id: int,
+    session: Session = Depends(get_db_session),
+) -> PostmortemDraftRead:
+    organization = session.get(Organization, organization_id)
+    if organization is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    repository = session.scalar(
+        select(Repository).where(
+            Repository.id == repository_id,
+            Repository.organization_id == organization_id,
+        )
+    )
+    if repository is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    incident = session.scalar(
+        select(Incident).where(
+            Incident.id == incident_id,
+            Incident.repository_id == repository_id,
+        )
+    )
+    if incident is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    if incident.status != "resolved":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Incident must be resolved before generating a "
+                "postmortem draft"
+            ),
+        )
+
+    context = _build_incident_read(session, incident).context
+    try:
+        model, draft = generate_postmortem_draft(context.events)
+        validate_postmortem_grounding(draft, context.events)
+    except PostmortemConfigurationError as error:
+        raise HTTPException(
+            status_code=503,
+            detail="Postmortem generation is not configured",
+        ) from error
+    except PostmortemGroundingError as error:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Postmortem generation returned invalid evidence "
+                "references"
+            ),
+        ) from error
+    except PostmortemGenerationError as error:
+        raise HTTPException(
+            status_code=502,
+            detail="Postmortem generation failed",
+        ) from error
+
+    return PostmortemDraftRead(
+        incident_id=incident.id,
+        model=model,
+        draft=draft,
+        evidence=context.events,
+    )

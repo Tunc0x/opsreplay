@@ -61,6 +61,7 @@ def _request_json(
     *,
     body: bytes | None = None,
     headers: dict[str, str] | None = None,
+    timeout: float = 10,
 ) -> object:
     request = Request(
         url,
@@ -70,7 +71,7 @@ def _request_json(
     )
 
     try:
-        with urlopen(request, timeout=10) as response:
+        with urlopen(request, timeout=timeout) as response:
             response_body = response.read()
 
     except HTTPError as error:
@@ -444,6 +445,25 @@ def _command_incident_resolve(
     _print_result(result)
 
 
+def _command_incident_postmortem_draft(
+    args: argparse.Namespace,
+) -> None:
+    url = (
+        f"{args.base_url}"
+        f"/organizations/{args.organization_id}"
+        f"/repositories/{args.repository_id}"
+        f"/incidents/{args.incident_id}/postmortem-draft"
+    )
+
+    result = _request_json(
+        "POST",
+        url,
+        timeout=60,
+    )
+
+    _print_result(result)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -731,6 +751,33 @@ def _build_parser() -> argparse.ArgumentParser:
 
     incident_resolve_parser.set_defaults(
         handler=_command_incident_resolve
+    )
+
+    incident_postmortem_parser = subparsers.add_parser(
+        "incident-postmortem-draft",
+        help="Generate a postmortem draft for a resolved incident.",
+    )
+
+    incident_postmortem_parser.add_argument(
+        "--organization-id",
+        type=int,
+        required=True,
+    )
+
+    incident_postmortem_parser.add_argument(
+        "--repository-id",
+        type=int,
+        required=True,
+    )
+
+    incident_postmortem_parser.add_argument(
+        "--incident-id",
+        type=int,
+        required=True,
+    )
+
+    incident_postmortem_parser.set_defaults(
+        handler=_command_incident_postmortem_draft
     )
 
     return parser

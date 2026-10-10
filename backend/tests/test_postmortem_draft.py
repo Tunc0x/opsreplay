@@ -163,6 +163,47 @@ def persist_postmortem_draft(
     )
 
 
+def regenerate_postmortem_draft(
+    client: TestClient,
+    monkeypatch: MonkeyPatch,
+    organization: Organization,
+    repository: Repository,
+    incident: Incident,
+    draft: PostmortemDraftContent,
+    model: str = "test-regenerated-model",
+) -> object:
+    def fake_generate(
+        events: list[TimelineEventRead],
+    ) -> tuple[str, PostmortemDraftContent]:
+        return model, draft
+
+    monkeypatch.setattr(
+        main_module,
+        "generate_postmortem_draft",
+        fake_generate,
+    )
+    return client.post(
+        f"/organizations/{organization.id}/repositories/{repository.id}/"
+        f"incidents/{incident.id}/postmortem-draft/regenerate"
+    )
+
+
+def postmortem_evidence_ids(
+    db_session: Session,
+    postmortem_draft_id: int,
+) -> list[int]:
+    return list(
+        db_session.scalars(
+            select(PostmortemDraftEvidence.timeline_event_id)
+            .where(
+                PostmortemDraftEvidence.postmortem_draft_id
+                == postmortem_draft_id
+            )
+            .order_by(PostmortemDraftEvidence.position.asc())
+        )
+    )
+
+
 def add_github_event(
     db_session: Session,
     repository: Repository,
@@ -741,3 +782,366 @@ def test_postmortem_from_another_repository_returns_404(
 
     assert response.status_code == 404
     assert response.json() == {"detail": "Incident not found"}
+
+
+def test_first_persisted_postmortem_is_version_one(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    organization, repository, incident, github_event, alert_event = (
+        create_incident_with_evidence(
+            db_session,
+            suffix="version-one",
+            resolved=True,
+        )
+    )
+    response = persist_postmortem_draft(
+        client,
+        monkeypatch,
+        organization,
+        repository,
+        incident,
+        valid_draft(github_event.id, alert_event.id),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["version"] == 1
+    stored_draft = db_session.scalar(
+        select(PostmortemDraft).where(
+            PostmortemDraft.incident_id == incident.id
+        )
+    )
+    assert stored_draft is not None
+    assert stored_draft.version == 1
+
+
+def test_regenerate_creates_new_version_with_current_live_evidence(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    organization, repository, incident, github_event, alert_event = (
+        create_incident_with_evidence(
+            db_session,
+            suffix="regenerate-live",
+            resolved=True,
+        )
+    )
+    version_one_content = valid_draft(github_event.id, alert_event.id)
+    first_response = persist_postmortem_draft(
+        client,
+        monkeypatch,
+        organization,
+        repository,
+        incident,
+        version_one_content,
+    )
+    assert first_response.status_code == 200
+    version_one = db_session.scalar(
+        select(PostmortemDraft).where(
+            PostmortemDraft.incident_id == incident.id,
+            PostmortemDraft.version == 1,
+        )
+    )
+    assert version_one is not None
+    original_content = json.loads(json.dumps(version_one.content))
+    original_evidence_ids = postmortem_evidence_ids(
+        db_session,
+        version_one.id,
+    )
+    late_event = add_github_event(
+        db_session,
+        repository,
+        suffix="regenerate-live",
+        observed_at=TRIGGER_TIME - timedelta(minutes=5),
+    )
+    db_session.commit()
+    version_two_content = valid_draft(github_event.id, alert_event.id)
+    version_two_content.summary[0].text = "Current evidence includes recovery."
+    version_two_content.summary[0].evidence_event_ids.append(late_event.id)
+
+    response = regenerate_postmortem_draft(
+        client,
+        monkeypatch,
+        organization,
+        repository,
+        incident,
+        version_two_content,
+    )
+
+    assert response.status_code == 201
+    result = response.json()
+    assert result["version"] == 2
+    drafts = list(
+        db_session.scalars(
+            select(PostmortemDraft)
+            .where(PostmortemDraft.incident_id == incident.id)
+            .order_by(PostmortemDraft.version.asc())
+        )
+    )
+    assert [draft.version for draft in drafts] == [1, 2]
+    db_session.refresh(drafts[0])
+    assert drafts[0].content == original_content
+    assert postmortem_evidence_ids(db_session, drafts[0].id) == (
+        original_evidence_ids
+    )
+    version_two_evidence_ids = postmortem_evidence_ids(
+        db_session,
+        drafts[1].id,
+    )
+    assert late_event.id in version_two_evidence_ids
+    assert [event["id"] for event in result["evidence"]] == (
+        version_two_evidence_ids
+    )
+
+
+def test_latest_postmortem_endpoints_use_highest_version(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    organization, repository, incident, github_event, alert_event = (
+        create_incident_with_evidence(
+            db_session,
+            suffix="latest-version",
+            resolved=True,
+        )
+    )
+    version_one_content = valid_draft(github_event.id, alert_event.id)
+    first_response = persist_postmortem_draft(
+        client,
+        monkeypatch,
+        organization,
+        repository,
+        incident,
+        version_one_content,
+    )
+    assert first_response.status_code == 200
+    version_two_content = valid_draft(github_event.id, alert_event.id)
+    version_two_content.summary[0].text = "Version two summary."
+    regenerate_response = regenerate_postmortem_draft(
+        client,
+        monkeypatch,
+        organization,
+        repository,
+        incident,
+        version_two_content,
+    )
+    assert regenerate_response.status_code == 201
+    base_url = (
+        f"/organizations/{organization.id}/repositories/{repository.id}/"
+        f"incidents/{incident.id}/postmortem-draft"
+    )
+
+    latest_response = client.get(base_url)
+
+    assert latest_response.status_code == 200
+    assert latest_response.json()["version"] == 2
+    assert latest_response.json()["draft"] == version_two_content.model_dump(
+        mode="json"
+    )
+    replacement = valid_draft(github_event.id, alert_event.id)
+    replacement.summary[0].text = "Human-edited latest version."
+
+    update_response = client.put(
+        base_url,
+        json={"draft": replacement.model_dump(mode="json")},
+    )
+
+    assert update_response.status_code == 200
+    assert update_response.json()["version"] == 2
+    assert update_response.json()["draft"] == replacement.model_dump(
+        mode="json"
+    )
+    version_one = db_session.scalar(
+        select(PostmortemDraft).where(
+            PostmortemDraft.incident_id == incident.id,
+            PostmortemDraft.version == 1,
+        )
+    )
+    version_two = db_session.scalar(
+        select(PostmortemDraft).where(
+            PostmortemDraft.incident_id == incident.id,
+            PostmortemDraft.version == 2,
+        )
+    )
+    assert version_one is not None
+    assert version_two is not None
+    db_session.refresh(version_one)
+    db_session.refresh(version_two)
+    assert version_one.content == version_one_content.model_dump(mode="json")
+    assert version_two.content == replacement.model_dump(mode="json")
+
+
+def test_specific_postmortem_version_can_be_retrieved(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    organization, repository, incident, github_event, alert_event = (
+        create_incident_with_evidence(
+            db_session,
+            suffix="specific-version",
+            resolved=True,
+        )
+    )
+    version_one_content = valid_draft(github_event.id, alert_event.id)
+    first_response = persist_postmortem_draft(
+        client,
+        monkeypatch,
+        organization,
+        repository,
+        incident,
+        version_one_content,
+    )
+    assert first_response.status_code == 200
+    late_event = add_github_event(
+        db_session,
+        repository,
+        suffix="specific-version",
+        observed_at=TRIGGER_TIME - timedelta(minutes=5),
+    )
+    db_session.commit()
+    version_two_content = valid_draft(github_event.id, alert_event.id)
+    version_two_content.summary[0].text = "Version two includes new evidence."
+    version_two_content.summary[0].evidence_event_ids.append(late_event.id)
+    regenerate_response = regenerate_postmortem_draft(
+        client,
+        monkeypatch,
+        organization,
+        repository,
+        incident,
+        version_two_content,
+    )
+    assert regenerate_response.status_code == 201
+
+    response = client.get(
+        f"/organizations/{organization.id}/repositories/{repository.id}/"
+        f"incidents/{incident.id}/postmortem-draft/versions/1"
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["version"] == 1
+    assert result["draft"] == version_one_content.model_dump(mode="json")
+    assert [event["id"] for event in result["evidence"]] == [
+        github_event.id,
+        alert_event.id,
+    ]
+    assert late_event.id not in {
+        event["id"] for event in result["evidence"]
+    }
+
+
+def test_regenerate_without_existing_draft_returns_404_without_openai(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    organization, repository, incident, _, _ = create_incident_with_evidence(
+        db_session,
+        suffix="regenerate-missing",
+        resolved=True,
+    )
+    generator_called = False
+
+    def unexpected_generate(
+        events: list[TimelineEventRead],
+    ) -> tuple[str, PostmortemDraftContent]:
+        nonlocal generator_called
+        generator_called = True
+        raise AssertionError("Missing drafts must not call OpenAI")
+
+    monkeypatch.setattr(
+        main_module,
+        "generate_postmortem_draft",
+        unexpected_generate,
+    )
+
+    response = client.post(
+        f"/organizations/{organization.id}/repositories/{repository.id}/"
+        f"incidents/{incident.id}/postmortem-draft/regenerate"
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Postmortem draft not found"}
+    assert generator_called is False
+
+
+def test_regeneration_preserves_human_edited_previous_version(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    organization, repository, incident, github_event, alert_event = (
+        create_incident_with_evidence(
+            db_session,
+            suffix="preserve-edit",
+            resolved=True,
+        )
+    )
+    first_response = persist_postmortem_draft(
+        client,
+        monkeypatch,
+        organization,
+        repository,
+        incident,
+        valid_draft(github_event.id, alert_event.id),
+    )
+    assert first_response.status_code == 200
+    base_url = (
+        f"/organizations/{organization.id}/repositories/{repository.id}/"
+        f"incidents/{incident.id}/postmortem-draft"
+    )
+    edited_content = valid_draft(github_event.id, alert_event.id)
+    edited_content.summary[0].text = "Human-edited Version 1 summary."
+    edit_response = client.put(
+        base_url,
+        json={"draft": edited_content.model_dump(mode="json")},
+    )
+    assert edit_response.status_code == 200
+    edited_result = edit_response.json()
+    original_evidence = edited_result["evidence"]
+    original_created_at = edited_result["created_at"]
+    original_updated_at = edited_result["updated_at"]
+    late_event = add_github_event(
+        db_session,
+        repository,
+        suffix="preserve-edit",
+        observed_at=TRIGGER_TIME - timedelta(minutes=5),
+    )
+    db_session.commit()
+    version_two_content = valid_draft(github_event.id, alert_event.id)
+    version_two_content.summary[0].text = "Fresh regenerated summary."
+    version_two_content.summary[0].evidence_event_ids.append(late_event.id)
+
+    regenerate_response = regenerate_postmortem_draft(
+        client,
+        monkeypatch,
+        organization,
+        repository,
+        incident,
+        version_two_content,
+    )
+    version_one_response = client.get(f"{base_url}/versions/1")
+
+    assert regenerate_response.status_code == 201
+    assert regenerate_response.json()["version"] == 2
+    assert regenerate_response.json()["id"] != edited_result["id"]
+    assert version_one_response.status_code == 200
+    version_one_result = version_one_response.json()
+    assert version_one_result["version"] == 1
+    assert version_one_result["draft"] == edited_content.model_dump(mode="json")
+    assert version_one_result["evidence"] == original_evidence
+    assert version_one_result["created_at"] == original_created_at
+    assert version_one_result["updated_at"] == original_updated_at
+    assert len(
+        list(
+            db_session.scalars(
+                select(PostmortemDraft).where(
+                    PostmortemDraft.incident_id == incident.id
+                )
+            )
+        )
+    ) == 2

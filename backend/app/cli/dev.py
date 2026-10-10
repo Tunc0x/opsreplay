@@ -530,6 +530,44 @@ def _command_incident_postmortem_draft_put(
     _print_result(result)
 
 
+def _command_incident_postmortem_draft_version_get(
+    args: argparse.Namespace,
+) -> None:
+    url = (
+        f"{args.base_url}"
+        f"/organizations/{args.organization_id}"
+        f"/repositories/{args.repository_id}"
+        f"/incidents/{args.incident_id}/postmortem-draft"
+        f"/versions/{args.version}"
+    )
+
+    result = _request_json(
+        "GET",
+        url,
+    )
+
+    _print_result(result)
+
+
+def _command_incident_postmortem_draft_regenerate(
+    args: argparse.Namespace,
+) -> None:
+    url = (
+        f"{args.base_url}"
+        f"/organizations/{args.organization_id}"
+        f"/repositories/{args.repository_id}"
+        f"/incidents/{args.incident_id}/postmortem-draft/regenerate"
+    )
+
+    result = _request_json(
+        "POST",
+        url,
+        timeout=60,
+    )
+
+    _print_result(result)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -907,6 +945,66 @@ def _build_parser() -> argparse.ArgumentParser:
 
     incident_postmortem_put_parser.set_defaults(
         handler=_command_incident_postmortem_draft_put
+    )
+
+    incident_postmortem_version_get_parser = subparsers.add_parser(
+        "incident-postmortem-draft-version-get",
+        help="Read one persisted postmortem draft version.",
+    )
+
+    incident_postmortem_version_get_parser.add_argument(
+        "--organization-id",
+        type=int,
+        required=True,
+    )
+
+    incident_postmortem_version_get_parser.add_argument(
+        "--repository-id",
+        type=int,
+        required=True,
+    )
+
+    incident_postmortem_version_get_parser.add_argument(
+        "--incident-id",
+        type=int,
+        required=True,
+    )
+
+    incident_postmortem_version_get_parser.add_argument(
+        "--version",
+        type=int,
+        required=True,
+    )
+
+    incident_postmortem_version_get_parser.set_defaults(
+        handler=_command_incident_postmortem_draft_version_get
+    )
+
+    incident_postmortem_regenerate_parser = subparsers.add_parser(
+        "incident-postmortem-draft-regenerate",
+        help="Generate a new postmortem draft version.",
+    )
+
+    incident_postmortem_regenerate_parser.add_argument(
+        "--organization-id",
+        type=int,
+        required=True,
+    )
+
+    incident_postmortem_regenerate_parser.add_argument(
+        "--repository-id",
+        type=int,
+        required=True,
+    )
+
+    incident_postmortem_regenerate_parser.add_argument(
+        "--incident-id",
+        type=int,
+        required=True,
+    )
+
+    incident_postmortem_regenerate_parser.set_defaults(
+        handler=_command_incident_postmortem_draft_regenerate
     )
 
     return parser

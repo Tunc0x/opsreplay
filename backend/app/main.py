@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Path, Query
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -45,8 +45,8 @@ app.include_router(alert_webhook_router)
 app.include_router(github_webhook_router)
 
 INCIDENT_TRIGGER_UNIQUE_CONSTRAINT = "uq_incidents_trigger_timeline_event_id"
-POSTMORTEM_DRAFT_INCIDENT_UNIQUE_CONSTRAINT = (
-    "uq_postmortem_drafts_incident_id"
+POSTMORTEM_DRAFT_INCIDENT_VERSION_UNIQUE_CONSTRAINT = (
+    "uq_postmortem_drafts_incident_version"
 )
 
 
@@ -379,6 +379,7 @@ def _build_postmortem_draft_read(
     return PostmortemDraftRead(
         id=postmortem_draft.id,
         incident_id=postmortem_draft.incident_id,
+        version=postmortem_draft.version,
         model=postmortem_draft.model,
         draft=PostmortemDraftContent.model_validate(
             postmortem_draft.content
@@ -386,6 +387,98 @@ def _build_postmortem_draft_read(
         evidence=persisted_evidence,
         created_at=postmortem_draft.created_at,
         updated_at=postmortem_draft.updated_at,
+    )
+
+
+def _get_latest_postmortem_draft(
+    session: Session,
+    incident_id: int,
+) -> PostmortemDraft | None:
+    return session.scalar(
+        select(PostmortemDraft)
+        .where(PostmortemDraft.incident_id == incident_id)
+        .order_by(PostmortemDraft.version.desc())
+        .limit(1)
+    )
+
+
+def _get_postmortem_draft_version(
+    session: Session,
+    incident_id: int,
+    version: int,
+) -> PostmortemDraft | None:
+    return session.scalar(
+        select(PostmortemDraft).where(
+            PostmortemDraft.incident_id == incident_id,
+            PostmortemDraft.version == version,
+        )
+    )
+
+
+def _generate_grounded_postmortem_draft(
+    evidence: list[TimelineEventRead],
+) -> tuple[str, PostmortemDraftContent]:
+    try:
+        model, draft = generate_postmortem_draft(evidence)
+        validate_postmortem_grounding(draft, evidence)
+    except PostmortemConfigurationError as error:
+        raise HTTPException(
+            status_code=503,
+            detail="Postmortem generation is not configured",
+        ) from error
+    except PostmortemGroundingError as error:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Postmortem generation returned invalid evidence "
+                "references"
+            ),
+        ) from error
+    except PostmortemGenerationError as error:
+        raise HTTPException(
+            status_code=502,
+            detail="Postmortem generation failed",
+        ) from error
+
+    return model, draft
+
+
+def _persist_postmortem_draft(
+    session: Session,
+    incident_id: int,
+    version: int,
+    model: str,
+    draft: PostmortemDraftContent,
+    evidence: list[TimelineEventRead],
+) -> PostmortemDraft:
+    postmortem_draft = PostmortemDraft(
+        incident_id=incident_id,
+        version=version,
+        model=model,
+        content=draft.model_dump(mode="json"),
+    )
+    session.add(postmortem_draft)
+    session.flush()
+    session.add_all(
+        [
+            PostmortemDraftEvidence(
+                postmortem_draft_id=postmortem_draft.id,
+                timeline_event_id=event.id,
+                position=position,
+            )
+            for position, event in enumerate(evidence)
+        ]
+    )
+    session.commit()
+    session.refresh(postmortem_draft)
+    return postmortem_draft
+
+
+def _integrity_constraint_name(error: IntegrityError) -> str | None:
+    return getattr(
+        getattr(error.orig, "diag", None),
+        "constraint_name",
+        None,
     )
 
 
@@ -650,72 +743,30 @@ def generate_incident_postmortem_draft(
             ),
         )
 
-    existing_draft = session.scalar(
-        select(PostmortemDraft).where(
-            PostmortemDraft.incident_id == incident.id
-        )
-    )
+    existing_draft = _get_latest_postmortem_draft(session, incident.id)
     if existing_draft is not None:
         return _build_postmortem_draft_read(session, existing_draft)
 
     context = _build_incident_read(session, incident).context
+    model, draft = _generate_grounded_postmortem_draft(context.events)
     try:
-        model, draft = generate_postmortem_draft(context.events)
-        validate_postmortem_grounding(draft, context.events)
-    except PostmortemConfigurationError as error:
-        raise HTTPException(
-            status_code=503,
-            detail="Postmortem generation is not configured",
-        ) from error
-    except PostmortemGroundingError as error:
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                "Postmortem generation returned invalid evidence "
-                "references"
-            ),
-        ) from error
-    except PostmortemGenerationError as error:
-        raise HTTPException(
-            status_code=502,
-            detail="Postmortem generation failed",
-        ) from error
-
-    postmortem_draft = PostmortemDraft(
-        incident_id=incident.id,
-        model=model,
-        content=draft.model_dump(mode="json"),
-    )
-    session.add(postmortem_draft)
-    try:
-        session.flush()
-        session.add_all(
-            [
-                PostmortemDraftEvidence(
-                    postmortem_draft_id=postmortem_draft.id,
-                    timeline_event_id=event.id,
-                    position=position,
-                )
-                for position, event in enumerate(context.events)
-            ]
+        postmortem_draft = _persist_postmortem_draft(
+            session,
+            incident.id,
+            1,
+            model,
+            draft,
+            context.events,
         )
-        session.commit()
-        session.refresh(postmortem_draft)
     except IntegrityError as error:
         session.rollback()
-        constraint_name = getattr(
-            getattr(error.orig, "diag", None),
-            "constraint_name",
-            None,
-        )
-        if constraint_name != POSTMORTEM_DRAFT_INCIDENT_UNIQUE_CONSTRAINT:
+        if (
+            _integrity_constraint_name(error)
+            != POSTMORTEM_DRAFT_INCIDENT_VERSION_UNIQUE_CONSTRAINT
+        ):
             raise
 
-        existing_draft = session.scalar(
-            select(PostmortemDraft).where(
-                PostmortemDraft.incident_id == incident.id
-            )
-        )
+        existing_draft = _get_latest_postmortem_draft(session, incident.id)
         if existing_draft is None:
             raise
         return _build_postmortem_draft_read(session, existing_draft)
@@ -740,11 +791,7 @@ def get_incident_postmortem_draft(
         repository_id,
         incident_id,
     )
-    postmortem_draft = session.scalar(
-        select(PostmortemDraft).where(
-            PostmortemDraft.incident_id == incident.id
-        )
-    )
+    postmortem_draft = _get_latest_postmortem_draft(session, incident.id)
     if postmortem_draft is None:
         raise HTTPException(
             status_code=404,
@@ -772,11 +819,7 @@ def update_incident_postmortem_draft(
         repository_id,
         incident_id,
     )
-    postmortem_draft = session.scalar(
-        select(PostmortemDraft).where(
-            PostmortemDraft.incident_id == incident.id
-        )
-    )
+    postmortem_draft = _get_latest_postmortem_draft(session, incident.id)
     if postmortem_draft is None:
         raise HTTPException(
             status_code=404,
@@ -802,3 +845,96 @@ def update_incident_postmortem_draft(
         postmortem_draft,
         evidence,
     )
+
+
+@app.get(
+    "/organizations/{organization_id}/repositories/{repository_id}/"
+    "incidents/{incident_id}/postmortem-draft/versions/{version}",
+    response_model=PostmortemDraftRead,
+)
+def get_incident_postmortem_draft_version(
+    organization_id: int,
+    repository_id: int,
+    incident_id: int,
+    version: Annotated[int, Path(ge=1)],
+    session: Session = Depends(get_db_session),
+) -> PostmortemDraftRead:
+    incident = _get_postmortem_incident(
+        session,
+        organization_id,
+        repository_id,
+        incident_id,
+    )
+    postmortem_draft = _get_postmortem_draft_version(
+        session,
+        incident.id,
+        version,
+    )
+    if postmortem_draft is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Postmortem draft version not found",
+        )
+
+    return _build_postmortem_draft_read(session, postmortem_draft)
+
+
+@app.post(
+    "/organizations/{organization_id}/repositories/{repository_id}/"
+    "incidents/{incident_id}/postmortem-draft/regenerate",
+    response_model=PostmortemDraftRead,
+    status_code=201,
+)
+def regenerate_incident_postmortem_draft(
+    organization_id: int,
+    repository_id: int,
+    incident_id: int,
+    session: Session = Depends(get_db_session),
+) -> PostmortemDraftRead:
+    incident = _get_postmortem_incident(
+        session,
+        organization_id,
+        repository_id,
+        incident_id,
+    )
+    if incident.status != "resolved":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Incident must be resolved before generating a "
+                "postmortem draft"
+            ),
+        )
+
+    latest_draft = _get_latest_postmortem_draft(session, incident.id)
+    if latest_draft is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Postmortem draft not found",
+        )
+
+    context = _build_incident_read(session, incident).context
+    model, draft = _generate_grounded_postmortem_draft(context.events)
+    next_version = latest_draft.version + 1
+    try:
+        postmortem_draft = _persist_postmortem_draft(
+            session,
+            incident.id,
+            next_version,
+            model,
+            draft,
+            context.events,
+        )
+    except IntegrityError as error:
+        session.rollback()
+        if (
+            _integrity_constraint_name(error)
+            != POSTMORTEM_DRAFT_INCIDENT_VERSION_UNIQUE_CONSTRAINT
+        ):
+            raise
+        raise HTTPException(
+            status_code=409,
+            detail="Postmortem regeneration conflicted; retry",
+        ) from error
+
+    return _build_postmortem_draft_read(session, postmortem_draft)

@@ -30,6 +30,7 @@ class PostmortemDraftContent(BaseModel):
 class PostmortemDraftRead(BaseModel):
     id: int
     incident_id: int
+    version: int
     model: str
     draft: PostmortemDraftContent
     evidence: list[TimelineEventRead]

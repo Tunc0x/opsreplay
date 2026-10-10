@@ -1,6 +1,14 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -12,7 +20,12 @@ class PostmortemDraft(Base):
     __table_args__ = (
         UniqueConstraint(
             "incident_id",
-            name="uq_postmortem_drafts_incident_id",
+            "version",
+            name="uq_postmortem_drafts_incident_version",
+        ),
+        CheckConstraint(
+            "version >= 1",
+            name="ck_postmortem_drafts_version_positive",
         ),
     )
 
@@ -25,6 +38,7 @@ class PostmortemDraft(Base):
         ),
         nullable=False,
     )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
     model: Mapped[str] = mapped_column(String(100), nullable=False)
     content: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(

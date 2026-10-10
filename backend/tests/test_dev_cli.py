@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pytest import MonkeyPatch
 
 from app.cli import dev
@@ -171,5 +173,139 @@ def test_incident_postmortem_draft_posts_to_generation_endpoint(
             "incidents/23/postmortem-draft",
             60
         )
+    ]
+    assert printed_results == [response]
+
+
+def test_incident_postmortem_draft_get_reads_persisted_draft(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    request_calls: list[tuple[str, str]] = []
+    printed_results: list[object] = []
+    response = {
+        "id": 31,
+        "incident_id": 23,
+        "model": "gpt-6-luna",
+        "draft": {},
+        "evidence": [],
+    }
+
+    def fake_request_json(method: str, url: str) -> object:
+        request_calls.append((method, url))
+        return response
+
+    monkeypatch.setattr(dev, "_request_json", fake_request_json)
+    monkeypatch.setattr(dev, "_print_result", printed_results.append)
+    args = dev._build_parser().parse_args(
+        [
+            "--base-url",
+            "http://opsreplay.test:8000",
+            "incident-postmortem-draft-get",
+            "--organization-id",
+            "4",
+            "--repository-id",
+            "12",
+            "--incident-id",
+            "23",
+        ]
+    )
+
+    assert args.handler is dev._command_incident_postmortem_draft_get
+    args.handler(args)
+
+    assert request_calls == [
+        (
+            "GET",
+            "http://opsreplay.test:8000/organizations/4/repositories/12/"
+            "incidents/23/postmortem-draft",
+        )
+    ]
+    assert printed_results == [response]
+
+
+def test_incident_postmortem_draft_put_replaces_persisted_draft(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    request_calls: list[dict[str, object]] = []
+    printed_results: list[object] = []
+    draft = {
+        "summary": [
+            {
+                "text": "The production alert was investigated.",
+                "evidence_event_ids": [10],
+            }
+        ],
+        "timeline": [
+            {
+                "text": "The alert was observed.",
+                "evidence_event_ids": [10],
+            }
+        ],
+        "impact": None,
+        "root_cause": None,
+        "resolution": None,
+        "unknowns": ["The root cause is not established."],
+    }
+    draft_file = tmp_path / "postmortem-draft.json"
+    draft_file.write_bytes(_json_body(draft))
+    response = {
+        "id": 31,
+        "incident_id": 23,
+        "model": "gpt-6-luna",
+        "draft": draft,
+        "evidence": [],
+    }
+
+    def fake_request_json(
+        method: str,
+        url: str,
+        *,
+        body: bytes | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> object:
+        request_calls.append(
+            {
+                "method": method,
+                "url": url,
+                "body": body,
+                "headers": headers,
+            }
+        )
+        return response
+
+    monkeypatch.setattr(dev, "_request_json", fake_request_json)
+    monkeypatch.setattr(dev, "_print_result", printed_results.append)
+    args = dev._build_parser().parse_args(
+        [
+            "--base-url",
+            "http://opsreplay.test:8000",
+            "incident-postmortem-draft-put",
+            "--organization-id",
+            "4",
+            "--repository-id",
+            "12",
+            "--incident-id",
+            "23",
+            "--draft-file",
+            str(draft_file),
+        ]
+    )
+
+    assert args.handler is dev._command_incident_postmortem_draft_put
+    args.handler(args)
+
+    assert request_calls == [
+        {
+            "method": "PUT",
+            "url": (
+                "http://opsreplay.test:8000/organizations/4/repositories/12/"
+                "incidents/23/postmortem-draft"
+            ),
+            "body": _json_body({"draft": draft}),
+            "headers": {
+                "Content-Type": "application/json",
+            },
+        }
     ]
     assert printed_results == [response]

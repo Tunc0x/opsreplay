@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -27,7 +28,16 @@ class PostmortemDraftContent(BaseModel):
 
 
 class PostmortemDraftRead(BaseModel):
+    id: int
     incident_id: int
     model: str
     draft: PostmortemDraftContent
     evidence: list[TimelineEventRead]
+    created_at: datetime
+    updated_at: datetime
+
+
+class PostmortemDraftUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    draft: PostmortemDraftContent

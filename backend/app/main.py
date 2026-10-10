@@ -17,6 +17,8 @@ from app.llm.postmortem import (
 from app.models.alert_delivery import AlertDelivery
 from app.models.incident import Incident
 from app.models.organization import Organization
+from app.models.postmortem_draft import PostmortemDraft
+from app.models.postmortem_draft_evidence import PostmortemDraftEvidence
 from app.models.repository import Repository
 from app.models.timeline_event import TimelineEvent
 from app.models.webhook_delivery import WebhookDelivery
@@ -25,7 +27,11 @@ from app.routers.github_webhook import router as github_webhook_router
 from app.schemas.incident import IncidentCreate, IncidentRead
 from app.schemas.investigation import InvestigationContextRead
 from app.schemas.organization import OrganizationCreate, OrganizationRead
-from app.schemas.postmortem import PostmortemDraftRead
+from app.schemas.postmortem import (
+    PostmortemDraftContent,
+    PostmortemDraftRead,
+    PostmortemDraftUpdate,
+)
 from app.schemas.repository import RepositoryCreate, RepositoryRead
 from app.schemas.timeline_event import (
     AlertWebhookEvidenceRead,
@@ -39,6 +45,9 @@ app.include_router(alert_webhook_router)
 app.include_router(github_webhook_router)
 
 INCIDENT_TRIGGER_UNIQUE_CONSTRAINT = "uq_incidents_trigger_timeline_event_id"
+POSTMORTEM_DRAFT_INCIDENT_UNIQUE_CONSTRAINT = (
+    "uq_postmortem_drafts_incident_id"
+)
 
 
 @app.get("/health")
@@ -155,6 +164,48 @@ def get_repository_from_organization(
 
     return repository
 
+def _timeline_event_read(
+    event: TimelineEvent,
+    github_delivery_id: str | None,
+    external_event_id: str | None,
+) -> TimelineEventRead:
+    if (
+        event.webhook_delivery_id is not None
+        and event.alert_delivery_id is None
+        and github_delivery_id is not None
+    ):
+        evidence = GitHubWebhookEvidenceRead(
+            kind="github_webhook",
+            webhook_delivery_id=event.webhook_delivery_id,
+            github_delivery_id=github_delivery_id,
+        )
+    elif (
+        event.webhook_delivery_id is None
+        and event.alert_delivery_id is not None
+        and external_event_id is not None
+    ):
+        evidence = AlertWebhookEvidenceRead(
+            kind="alert_webhook",
+            alert_delivery_id=event.alert_delivery_id,
+            external_event_id=external_event_id,
+        )
+    else:
+        raise RuntimeError(
+            f"TimelineEvent {event.id} has invalid evidence provenance."
+        )
+
+    return TimelineEventRead(
+        id=event.id,
+        repository_id=event.repository_id,
+        source=event.source,
+        event_type=event.event_type,
+        summary=event.summary,
+        observed_at=event.observed_at,
+        created_at=event.created_at,
+        evidence=evidence,
+    )
+
+
 # read timeline event from repository id and optionally set a timeframe
 def _read_timeline_events(
     session: Session,
@@ -191,41 +242,11 @@ def _read_timeline_events(
     for event, github_delivery_id, external_event_id in session.execute(
         statement
     ):
-        if (
-            event.webhook_delivery_id is not None
-            and event.alert_delivery_id is None
-            and github_delivery_id is not None
-        ):
-            evidence = GitHubWebhookEvidenceRead(
-                kind="github_webhook",
-                webhook_delivery_id=event.webhook_delivery_id,
-                github_delivery_id=github_delivery_id,
-            )
-        elif (
-            event.webhook_delivery_id is None
-            and event.alert_delivery_id is not None
-            and external_event_id is not None
-        ):
-            evidence = AlertWebhookEvidenceRead(
-                kind="alert_webhook",
-                alert_delivery_id=event.alert_delivery_id,
-                external_event_id=external_event_id,
-            )
-        else:
-            raise RuntimeError(
-                f"TimelineEvent {event.id} has invalid evidence provenance."
-            )
-
         timeline.append(
-            TimelineEventRead(
-                id=event.id,
-                repository_id=event.repository_id,
-                source=event.source,
-                event_type=event.event_type,
-                summary=event.summary,
-                observed_at=event.observed_at,
-                created_at=event.created_at,
-                evidence=evidence,
+            _timeline_event_read(
+                event,
+                github_delivery_id,
+                external_event_id,
             )
         )
     return timeline
@@ -303,6 +324,100 @@ def _build_incident_read(
         created_at=incident.created_at,
         context=context,
     )
+
+
+def _read_postmortem_evidence(
+    session: Session,
+    postmortem_draft_id: int,
+) -> list[TimelineEventRead]:
+    statement = (
+        select(
+            TimelineEvent,
+            WebhookDelivery.delivery_id,
+            AlertDelivery.external_event_id,
+        )
+        .join(
+            PostmortemDraftEvidence,
+            PostmortemDraftEvidence.timeline_event_id == TimelineEvent.id,
+        )
+        .outerjoin(
+            WebhookDelivery,
+            TimelineEvent.webhook_delivery_id == WebhookDelivery.id,
+        )
+        .outerjoin(
+            AlertDelivery,
+            TimelineEvent.alert_delivery_id == AlertDelivery.id,
+        )
+        .where(
+            PostmortemDraftEvidence.postmortem_draft_id
+            == postmortem_draft_id
+        )
+        .order_by(PostmortemDraftEvidence.position.asc())
+    )
+    return [
+        _timeline_event_read(
+            event,
+            github_delivery_id,
+            external_event_id,
+        )
+        for event, github_delivery_id, external_event_id in session.execute(
+            statement
+        )
+    ]
+
+
+def _build_postmortem_draft_read(
+    session: Session,
+    postmortem_draft: PostmortemDraft,
+    evidence: list[TimelineEventRead] | None = None,
+) -> PostmortemDraftRead:
+    persisted_evidence = (
+        evidence
+        if evidence is not None
+        else _read_postmortem_evidence(session, postmortem_draft.id)
+    )
+    return PostmortemDraftRead(
+        id=postmortem_draft.id,
+        incident_id=postmortem_draft.incident_id,
+        model=postmortem_draft.model,
+        draft=PostmortemDraftContent.model_validate(
+            postmortem_draft.content
+        ),
+        evidence=persisted_evidence,
+        created_at=postmortem_draft.created_at,
+        updated_at=postmortem_draft.updated_at,
+    )
+
+
+def _get_postmortem_incident(
+    session: Session,
+    organization_id: int,
+    repository_id: int,
+    incident_id: int,
+) -> Incident:
+    organization = session.get(Organization, organization_id)
+    if organization is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    repository = session.scalar(
+        select(Repository).where(
+            Repository.id == repository_id,
+            Repository.organization_id == organization_id,
+        )
+    )
+    if repository is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    incident = session.scalar(
+        select(Incident).where(
+            Incident.id == incident_id,
+            Incident.repository_id == repository_id,
+        )
+    )
+    if incident is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    return incident
 
 # returns the whole timeline for repository X
 @app.get(
@@ -519,27 +634,12 @@ def generate_incident_postmortem_draft(
     incident_id: int,
     session: Session = Depends(get_db_session),
 ) -> PostmortemDraftRead:
-    organization = session.get(Organization, organization_id)
-    if organization is None:
-        raise HTTPException(status_code=404, detail="Organization not found")
-
-    repository = session.scalar(
-        select(Repository).where(
-            Repository.id == repository_id,
-            Repository.organization_id == organization_id,
-        )
+    incident = _get_postmortem_incident(
+        session,
+        organization_id,
+        repository_id,
+        incident_id,
     )
-    if repository is None:
-        raise HTTPException(status_code=404, detail="Repository not found")
-
-    incident = session.scalar(
-        select(Incident).where(
-            Incident.id == incident_id,
-            Incident.repository_id == repository_id,
-        )
-    )
-    if incident is None:
-        raise HTTPException(status_code=404, detail="Incident not found")
 
     if incident.status != "resolved":
         raise HTTPException(
@@ -549,6 +649,14 @@ def generate_incident_postmortem_draft(
                 "postmortem draft"
             ),
         )
+
+    existing_draft = session.scalar(
+        select(PostmortemDraft).where(
+            PostmortemDraft.incident_id == incident.id
+        )
+    )
+    if existing_draft is not None:
+        return _build_postmortem_draft_read(session, existing_draft)
 
     context = _build_incident_read(session, incident).context
     try:
@@ -573,9 +681,124 @@ def generate_incident_postmortem_draft(
             detail="Postmortem generation failed",
         ) from error
 
-    return PostmortemDraftRead(
+    postmortem_draft = PostmortemDraft(
         incident_id=incident.id,
         model=model,
-        draft=draft,
-        evidence=context.events,
+        content=draft.model_dump(mode="json"),
+    )
+    session.add(postmortem_draft)
+    try:
+        session.flush()
+        session.add_all(
+            [
+                PostmortemDraftEvidence(
+                    postmortem_draft_id=postmortem_draft.id,
+                    timeline_event_id=event.id,
+                    position=position,
+                )
+                for position, event in enumerate(context.events)
+            ]
+        )
+        session.commit()
+        session.refresh(postmortem_draft)
+    except IntegrityError as error:
+        session.rollback()
+        constraint_name = getattr(
+            getattr(error.orig, "diag", None),
+            "constraint_name",
+            None,
+        )
+        if constraint_name != POSTMORTEM_DRAFT_INCIDENT_UNIQUE_CONSTRAINT:
+            raise
+
+        existing_draft = session.scalar(
+            select(PostmortemDraft).where(
+                PostmortemDraft.incident_id == incident.id
+            )
+        )
+        if existing_draft is None:
+            raise
+        return _build_postmortem_draft_read(session, existing_draft)
+
+    return _build_postmortem_draft_read(session, postmortem_draft)
+
+
+@app.get(
+    "/organizations/{organization_id}/repositories/{repository_id}/"
+    "incidents/{incident_id}/postmortem-draft",
+    response_model=PostmortemDraftRead,
+)
+def get_incident_postmortem_draft(
+    organization_id: int,
+    repository_id: int,
+    incident_id: int,
+    session: Session = Depends(get_db_session),
+) -> PostmortemDraftRead:
+    incident = _get_postmortem_incident(
+        session,
+        organization_id,
+        repository_id,
+        incident_id,
+    )
+    postmortem_draft = session.scalar(
+        select(PostmortemDraft).where(
+            PostmortemDraft.incident_id == incident.id
+        )
+    )
+    if postmortem_draft is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Postmortem draft not found",
+        )
+
+    return _build_postmortem_draft_read(session, postmortem_draft)
+
+
+@app.put(
+    "/organizations/{organization_id}/repositories/{repository_id}/"
+    "incidents/{incident_id}/postmortem-draft",
+    response_model=PostmortemDraftRead,
+)
+def update_incident_postmortem_draft(
+    organization_id: int,
+    repository_id: int,
+    incident_id: int,
+    update: PostmortemDraftUpdate,
+    session: Session = Depends(get_db_session),
+) -> PostmortemDraftRead:
+    incident = _get_postmortem_incident(
+        session,
+        organization_id,
+        repository_id,
+        incident_id,
+    )
+    postmortem_draft = session.scalar(
+        select(PostmortemDraft).where(
+            PostmortemDraft.incident_id == incident.id
+        )
+    )
+    if postmortem_draft is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Postmortem draft not found",
+        )
+
+    evidence = _read_postmortem_evidence(session, postmortem_draft.id)
+    try:
+        validate_postmortem_grounding(update.draft, evidence)
+    except PostmortemGroundingError as error:
+        raise HTTPException(
+            status_code=400,
+            detail="Postmortem draft contains invalid evidence references",
+        ) from error
+
+    postmortem_draft.content = update.draft.model_dump(mode="json")
+    postmortem_draft.updated_at = datetime.now(timezone.utc)
+    session.commit()
+    session.refresh(postmortem_draft)
+
+    return _build_postmortem_draft_read(
+        session,
+        postmortem_draft,
+        evidence,
     )

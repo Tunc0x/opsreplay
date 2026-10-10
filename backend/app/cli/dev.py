@@ -5,6 +5,7 @@ import json
 import os
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -32,6 +33,29 @@ def _json_body(payload: dict[str, object]) -> bytes:
         separators=(",", ":"),
         ensure_ascii=False,
     ).encode("utf-8")
+
+
+def _read_json_object(path: str) -> dict[str, object]:
+    try:
+        contents = Path(path).read_text(encoding="utf-8")
+    except OSError as error:
+        raise DevCliError(
+            f"Could not read JSON file {path}: {error}"
+        ) from error
+
+    try:
+        value = json.loads(contents)
+    except json.JSONDecodeError as error:
+        raise DevCliError(
+            f"JSON file {path} does not contain valid JSON."
+        ) from error
+
+    if not isinstance(value, dict):
+        raise DevCliError(
+            f"JSON file {path} must contain a JSON object."
+        )
+
+    return value
 
 # read the secret
 def _required_secret(environment_variable: str) -> str:
@@ -464,6 +488,48 @@ def _command_incident_postmortem_draft(
     _print_result(result)
 
 
+def _command_incident_postmortem_draft_get(
+    args: argparse.Namespace,
+) -> None:
+    url = (
+        f"{args.base_url}"
+        f"/organizations/{args.organization_id}"
+        f"/repositories/{args.repository_id}"
+        f"/incidents/{args.incident_id}/postmortem-draft"
+    )
+
+    result = _request_json(
+        "GET",
+        url,
+    )
+
+    _print_result(result)
+
+
+def _command_incident_postmortem_draft_put(
+    args: argparse.Namespace,
+) -> None:
+    draft = _read_json_object(args.draft_file)
+    body = _json_body({"draft": draft})
+    url = (
+        f"{args.base_url}"
+        f"/organizations/{args.organization_id}"
+        f"/repositories/{args.repository_id}"
+        f"/incidents/{args.incident_id}/postmortem-draft"
+    )
+
+    result = _request_json(
+        "PUT",
+        url,
+        body=body,
+        headers={
+            "Content-Type": "application/json",
+        },
+    )
+
+    _print_result(result)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -778,6 +844,69 @@ def _build_parser() -> argparse.ArgumentParser:
 
     incident_postmortem_parser.set_defaults(
         handler=_command_incident_postmortem_draft
+    )
+
+    incident_postmortem_get_parser = subparsers.add_parser(
+        "incident-postmortem-draft-get",
+        help="Read a persisted postmortem draft.",
+    )
+
+    incident_postmortem_get_parser.add_argument(
+        "--organization-id",
+        type=int,
+        required=True,
+    )
+
+    incident_postmortem_get_parser.add_argument(
+        "--repository-id",
+        type=int,
+        required=True,
+    )
+
+    incident_postmortem_get_parser.add_argument(
+        "--incident-id",
+        type=int,
+        required=True,
+    )
+
+    incident_postmortem_get_parser.set_defaults(
+        handler=_command_incident_postmortem_draft_get
+    )
+
+    incident_postmortem_put_parser = subparsers.add_parser(
+        "incident-postmortem-draft-put",
+        help="Replace a persisted postmortem draft.",
+    )
+
+    incident_postmortem_put_parser.add_argument(
+        "--organization-id",
+        type=int,
+        required=True,
+    )
+
+    incident_postmortem_put_parser.add_argument(
+        "--repository-id",
+        type=int,
+        required=True,
+    )
+
+    incident_postmortem_put_parser.add_argument(
+        "--incident-id",
+        type=int,
+        required=True,
+    )
+
+    incident_postmortem_put_parser.add_argument(
+        "--draft-file",
+        required=True,
+        help=(
+            "Path to JSON containing the replacement "
+            "PostmortemDraftContent."
+        ),
+    )
+
+    incident_postmortem_put_parser.set_defaults(
+        handler=_command_incident_postmortem_draft_put
     )
 
     return parser

@@ -15,6 +15,8 @@ from app.models import (  # noqa: F401
     GitHubInstallation,
     Incident,
     Organization,
+    PostmortemDraft,
+    PostmortemDraftEvidence,
     Repository,
     TimelineEvent,
     WebhookDelivery,

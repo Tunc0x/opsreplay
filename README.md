@@ -19,7 +19,7 @@ OpsReplay connects production alerts with the releases, merges, and other change
 - **Evidence-linked timelines** — chronological repository events that retain links back to the originating GitHub or alert delivery
 - **Investigation context** — lookback / lookahead windows around an alert so related changes are easy to inspect together
 - **Incident lifecycle** — create, track, and resolve incidents keyed to an alert trigger
-- **Grounded postmortem drafts** — OpenAI structured drafts for resolved incidents, with server-side validation that citations refer to real timeline events in context
+- **Grounded, versioned postmortem drafts** — OpenAI structured drafts for resolved incidents, with server-side validation that citations refer to real timeline events in context. Drafts are saved and editable, edits are checked against the same evidence, and regenerating creates a new version while earlier ones stay retrievable
 - **Local Compose stack** — API, Postgres, optional queue and workers for end-to-end development
 
 ## Architecture

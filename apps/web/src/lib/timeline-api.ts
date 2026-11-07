@@ -5,11 +5,15 @@ import "server-only";
 import type { TimelineEventPreview } from "@/types/timeline";
 
 export class TimelineApiError extends Error {
-  constructor(public readonly kind: "not-found" | "unavailable") {
+  constructor(
+    public readonly kind: "not-found" | "unavailable" | "invalid-response",
+  ) {
     super(
       kind === "not-found"
         ? "Organization or repository not found"
-        : "Repository timeline is unavailable",
+        : kind === "invalid-response"
+          ? "Invalid timeline data"
+          : "Repository timeline is unavailable",
     );
     this.name = "TimelineApiError";
   }
@@ -76,12 +80,12 @@ export async function fetchRepositoryTimeline(
   try {
     payload = await response.json();
   } catch {
-    throw new TimelineApiError("unavailable");
+    throw new TimelineApiError("invalid-response");
   }
 
   // every event must pass validation
   if (!Array.isArray(payload) || !payload.every(isTimelineEventPreview)) {
-    throw new TimelineApiError("unavailable");
+    throw new TimelineApiError("invalid-response");
   }
 
   // return a new array containing only those five fields

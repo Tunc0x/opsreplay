@@ -1,7 +1,10 @@
 import { EmptyState } from "@/components/empty-state";
+import { RepositorySelector } from "@/components/repository-selector";
 import { TimelineEventList } from "@/components/timeline-event-list";
 import { exampleTimelineEvents } from "@/data/example-timeline";
+import { fetchRepositories, RepositoriesApiError } from "@/lib/repositories-api";
 import { fetchRepositoryTimeline, TimelineApiError } from "@/lib/timeline-api";
+import type { RepositoryOption } from "@/types/repository";
 import type { TimelineEventPreview } from "@/types/timeline";
 
 // accept the value only if it is a positive, safe integer
@@ -18,35 +21,93 @@ export default async function Home({ searchParams }: PageProps<"/">) {
   const params = await searchParams;
   const isExample =
     params.organizationId === undefined && params.repositoryId === undefined;
+  const organizationId = parsePositiveId(params.organizationId);
+  const repositoryId = parsePositiveId(params.repositoryId);
+  const hasRepositoryId = params.repositoryId !== undefined;
+  let repositories: RepositoryOption[] | null = null;
+  let selectedRepository: RepositoryOption | undefined;
   let events: TimelineEventPreview[] = isExample ? exampleTimelineEvents : [];
   let errorState: { title: string; description: string } | null = null;
 
   if (!isExample) {
-    const organizationId = parsePositiveId(params.organizationId);
-    const repositoryId = parsePositiveId(params.repositoryId);
-
-    if (organizationId === null || repositoryId === null) {
+    if (organizationId === null || (hasRepositoryId && repositoryId === null)) {
       errorState = {
-        title: "Enter valid organization and repository IDs",
+        title: "Invalid repository selection",
         description:
-          "Provide both organizationId and repositoryId once in the URL. Each must be a positive whole number within JavaScript's safe integer range.",
+          "Provide organizationId before selecting a repository. Each supplied ID must appear once and be a positive whole number within JavaScript's safe integer range.",
       };
     } else {
       try {
-        events = await fetchRepositoryTimeline(organizationId, repositoryId);
+        repositories = await fetchRepositories(organizationId);
       } catch (error) {
-        errorState =
-          error instanceof TimelineApiError && error.kind === "not-found"
-            ? {
-                title: "Organization or repository not found",
+        if (error instanceof RepositoriesApiError && error.kind === "not-found") {
+          errorState = {
+            title: "Organization not found",
+            description:
+              "Check the organization ID and load its repositories again.",
+          };
+        } else if (
+          error instanceof RepositoriesApiError &&
+          error.kind === "invalid-response"
+        ) {
+          errorState = {
+            title: "Invalid repository data",
+            description:
+              "The backend returned an unexpected repository list. Try again later.",
+          };
+        } else {
+          errorState = {
+            title: "Repositories are unavailable",
+            description:
+              "The repository list could not be loaded. Check that the backend is running and OPSREPLAY_API_BASE_URL is configured for the Next.js server, then try again.",
+          };
+        }
+      }
+
+      if (repositories !== null && hasRepositoryId) {
+        selectedRepository = repositories.find(
+          (repository) =>
+            repository.id === repositoryId &&
+            repository.organization_id === organizationId,
+        );
+
+        if (selectedRepository === undefined) {
+          errorState = {
+            title: "Repository not found",
+            description:
+              "The selected repository does not belong to this organization. Choose a repository from the list above.",
+          };
+        } else {
+          try {
+            events = await fetchRepositoryTimeline(
+              organizationId,
+              selectedRepository.id,
+            );
+          } catch (error) {
+            if (error instanceof TimelineApiError && error.kind === "not-found") {
+              errorState = {
+                title: "Repository not found",
                 description:
-                  "Check both IDs and make sure the repository belongs to the specified organization.",
-              }
-            : {
+                  "This repository is no longer available under the selected organization. Load the repositories again.",
+              };
+            } else if (
+              error instanceof TimelineApiError &&
+              error.kind === "invalid-response"
+            ) {
+              errorState = {
+                title: "Invalid timeline data",
+                description:
+                  "The backend returned an unexpected timeline response. Try again later.",
+              };
+            } else {
+              errorState = {
                 title: "Repository timeline is unavailable",
                 description:
                   "The timeline could not be loaded. Check that the backend is running and OPSREPLAY_API_BASE_URL is configured for the Next.js server, then reload this page.",
               };
+            }
+          }
+        }
       }
     }
   }
@@ -70,49 +131,50 @@ export default async function Home({ searchParams }: PageProps<"/">) {
         </p>
       </div>
 
-      {isExample && (
+      <RepositorySelector
+        organizationId={organizationId}
+        repositories={repositories}
+        selectedRepositoryId={selectedRepository?.id ?? null}
+      />
+
+      {errorState && (
         <EmptyState
-          title="No repository selected"
-          description="You are viewing a fictional example. No timeline data has been requested from the backend."
+          title={errorState.title}
+          description={errorState.description}
         />
       )}
 
-      <section
-        aria-labelledby="timeline-heading"
-        className={isExample ? "mt-12 sm:mt-16" : undefined}
-      >
-        <div className="mb-6">
-          <p className="mb-3 font-mono text-xs tracking-widest text-accent uppercase">
-            {isExample ? "Fictional sample data · Not live" : "Repository events"}
-          </p>
-          <h2
-            id="timeline-heading"
-            className="text-2xl font-medium tracking-tight"
-          >
-            {isExample ? "Example investigation timeline" : "Repository timeline"}
-          </h2>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-muted sm:text-base sm:leading-7">
-            {isExample
-              ? "These three fictional events illustrate how an investigation timeline could look. No real incident or backend data is shown. All times are displayed in UTC."
-              : "Timeline events for the organization and repository specified in the URL. All times are displayed in UTC."}
-          </p>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-muted">
-            To load real data, supply both IDs in the URL:{" "}
-            <code className="text-foreground break-words">
-              {"/?organizationId=<organization-id>&repositoryId=<repository-id>"}
-            </code>
-          </p>
-        </div>
-
-        {errorState ? (
-          <EmptyState
-            title={errorState.title}
-            description={errorState.description}
-          />
-        ) : (
+      {!errorState && (isExample || selectedRepository) && (
+        <section aria-labelledby="timeline-heading">
+          <div className="mb-6">
+            <p className="mb-3 font-mono text-xs tracking-widest text-accent uppercase">
+              {isExample ? "Fictional sample data · Not live" : "Repository events"}
+            </p>
+            <h2
+              id="timeline-heading"
+              className="text-2xl font-medium tracking-tight"
+            >
+              {isExample ? "Example investigation timeline" : "Repository timeline"}
+            </h2>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-muted sm:text-base sm:leading-7">
+              {isExample
+                ? "These three fictional events illustrate how an investigation timeline could look. No real incident or backend data is shown. All times are displayed in UTC."
+                : `Timeline events for ${selectedRepository?.name}. All times are displayed in UTC.`}
+            </p>
+          </div>
           <TimelineEventList events={events} />
+        </section>
+      )}
+
+      {!errorState &&
+        repositories !== null &&
+        repositories.length > 0 &&
+        !selectedRepository && (
+          <EmptyState
+            title="Select a repository"
+            description="Choose a repository by name above, then select View timeline to load its events."
+          />
         )}
-      </section>
     </main>
   );
 }

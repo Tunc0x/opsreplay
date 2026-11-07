@@ -1,23 +1,19 @@
 import { EmptyState } from "@/components/empty-state";
+import { formatUtcTimestamp } from "@/lib/format-time";
 import type { TimelineEventPreview } from "@/types/timeline";
 
 type TimelineEventListProps = {
   events: readonly TimelineEventPreview[];
+  repositoryContext?: {
+    organizationId: number;
+    repositoryId: number;
+  };
 };
 
-const dateFormatter = new Intl.DateTimeFormat("en-GB", {
-  day: "2-digit",
-  month: "short",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  second: "2-digit",
-  hour12: false,
-  timeZone: "UTC",
-  timeZoneName: "short",
-});
-
-export function TimelineEventList({ events }: TimelineEventListProps) {
+export function TimelineEventList({
+  events,
+  repositoryContext,
+}: TimelineEventListProps) {
   if (events.length === 0) {
     return (
       <EmptyState
@@ -57,7 +53,7 @@ export function TimelineEventList({ events }: TimelineEventListProps) {
               dateTime={event.observed_at}
               className="font-mono text-xs leading-6 text-muted"
             >
-              {dateFormatter.format(new Date(event.observed_at))}
+              {formatUtcTimestamp(event.observed_at)}
             </time>
             <div className="min-w-0">
               <div className="mb-3 flex flex-wrap items-center gap-3">
@@ -71,6 +67,21 @@ export function TimelineEventList({ events }: TimelineEventListProps) {
               <p className="text-sm leading-6 break-words sm:text-base">
                 {event.summary}
               </p>
+              {repositoryContext &&
+                event.source === "alert" &&
+                event.event_type === "alert" && (
+                  <a
+                    href={`/?${new URLSearchParams({
+                      organizationId: String(repositoryContext.organizationId),
+                      repositoryId: String(repositoryContext.repositoryId),
+                      triggerEventId: String(event.id),
+                    })}`}
+                    className="mt-3 inline-flex text-sm font-medium text-accent underline underline-offset-4 hover:text-foreground"
+                  >
+                    Investigate alert
+                    <span className="sr-only"> event {event.id}</span>
+                  </a>
+                )}
             </div>
           </li>
         );

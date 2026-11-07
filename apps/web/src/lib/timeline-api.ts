@@ -20,7 +20,9 @@ export class TimelineApiError extends Error {
 }
 
 // validate the backend's data
-function isTimelineEventPreview(value: unknown): value is TimelineEventPreview {
+export function isTimelineEventPreview(
+  value: unknown,
+): value is TimelineEventPreview {
   if (typeof value !== "object" || value === null) {
     return false;
   }

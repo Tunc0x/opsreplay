@@ -4,12 +4,16 @@ type RepositorySelectorProps = {
   organizationId: number | null;
   repositories: readonly RepositoryOption[] | null;
   selectedRepositoryId: number | null;
+  action?: "/" | "/incidents";
+  submitLabel?: string;
 };
 
 export function RepositorySelector({
   organizationId,
   repositories,
   selectedRepositoryId,
+  action = "/",
+  submitLabel = "View timeline",
 }: RepositorySelectorProps) {
   return (
     <section
@@ -24,7 +28,7 @@ export function RepositorySelector({
       </p>
 
       <form
-        action="/"
+        action={action}
         method="get"
         className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-end"
       >
@@ -64,7 +68,7 @@ export function RepositorySelector({
           </p>
         ) : (
           <form
-            action="/"
+            action={action}
             method="get"
             className="mt-6 flex flex-col gap-3 border-t border-line pt-6 sm:flex-row sm:items-end"
           >
@@ -97,7 +101,7 @@ export function RepositorySelector({
               type="submit"
               className="min-h-11 cursor-pointer rounded-md bg-accent px-4 py-2 text-sm font-medium text-background hover:bg-accent/90"
             >
-              View timeline
+              {submitLabel}
             </button>
           </form>
         ))}

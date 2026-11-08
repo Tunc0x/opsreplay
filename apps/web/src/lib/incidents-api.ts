@@ -2,7 +2,7 @@ import "server-only";
 
 import { isPositiveSafeInteger } from "@/lib/ids";
 import { parseInvestigationContext } from "@/lib/investigation-api";
-import type { IncidentPreview } from "@/types/incident";
+import type { IncidentPreview, IncidentSummaryPreview } from "@/types/incident";
 
 export class IncidentApiError extends Error {
   constructor(
@@ -168,6 +168,66 @@ export async function fetchIncident(
   const incident = parseIncident(payload, repositoryId);
   if (incident.id !== incidentId) throw new IncidentApiError("invalid-response");
   return incident;
+}
+
+export async function fetchIncidents(
+  organizationId: number,
+  repositoryId: number,
+): Promise<IncidentSummaryPreview[]> {
+  const apiBaseUrl = process.env.OPSREPLAY_API_BASE_URL?.trim();
+  if (!apiBaseUrl) throw new IncidentApiError("unavailable");
+
+  const url = `${apiBaseUrl.replace(/\/+$/, "")}/organizations/${organizationId}/repositories/${repositoryId}/incidents`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    throw new IncidentApiError("unavailable");
+  }
+  if (response.status === 404) throw new IncidentApiError("not-found");
+  if (!response.ok) throw new IncidentApiError("http-error");
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch (error) {
+    throw new IncidentApiError(
+      error instanceof SyntaxError ? "invalid-response" : "unavailable",
+    );
+  }
+  if (!Array.isArray(payload)) throw new IncidentApiError("invalid-response");
+
+  return payload.map((item: unknown) => {
+    if (
+      typeof item !== "object" || item === null ||
+      !("id" in item) || !isPositiveSafeInteger(item.id) ||
+      !("repository_id" in item) || item.repository_id !== repositoryId ||
+      !("trigger_timeline_event_id" in item) ||
+      !isPositiveSafeInteger(item.trigger_timeline_event_id) ||
+      !("title" in item) || typeof item.title !== "string" ||
+      !("repository_name" in item) || typeof item.repository_name !== "string" ||
+      !("alert_observed_at" in item) || typeof item.alert_observed_at !== "string" ||
+      !Number.isFinite(Date.parse(item.alert_observed_at)) ||
+      !("created_at" in item) || typeof item.created_at !== "string" ||
+      !Number.isFinite(Date.parse(item.created_at)) ||
+      !("status" in item) || (item.status !== "open" && item.status !== "resolved")
+    ) {
+      throw new IncidentApiError("invalid-response");
+    }
+    return {
+      id: item.id,
+      repository_id: item.repository_id,
+      trigger_timeline_event_id: item.trigger_timeline_event_id,
+      title: item.title,
+      repository_name: item.repository_name,
+      alert_observed_at: item.alert_observed_at,
+      created_at: item.created_at,
+      status: item.status,
+    };
+  });
 }
 
 export async function resolveIncident(

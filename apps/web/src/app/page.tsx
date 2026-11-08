@@ -4,7 +4,7 @@ import { EmptyState } from "@/components/empty-state";
 import { RepositorySelector } from "@/components/repository-selector";
 import { TimelineEventList } from "@/components/timeline-event-list";
 import { exampleTimelineEvents } from "@/data/example-timeline";
-import { formatUtcTimestamp } from "@/lib/format-time";
+import { formatUtcTimestamp, formatUtcWindow } from "@/lib/format-time";
 import { parsePositiveId } from "@/lib/ids";
 import {
   getIncidentCreationFeedback,
@@ -234,6 +234,23 @@ export default async function Home({ searchParams }: PageProps<"/">) {
     }
   }
 
+  const triggeringAlert = investigation?.events.find(
+    (event) => event.id === investigation.trigger_event_id &&
+      event.source === "alert" && event.event_type === "alert",
+  );
+  // Normalized alert summaries use "SEVERITY: title". Keep other formats intact.
+  const alertSummary = triggeringAlert?.summary.match(/^([A-Z][A-Z0-9 _-]*): ([\s\S]+)$/);
+  const alertTitle = alertSummary?.[2] ?? triggeringAlert?.summary;
+  const alertSeverity = alertSummary
+    ? alertSummary[1].charAt(0) + alertSummary[1].slice(1).toLowerCase()
+    : null;
+  const minutesBeforeAlert = investigation && triggeringAlert
+    ? (Date.parse(triggeringAlert.observed_at) - Date.parse(investigation.window_start)) / 60_000
+    : null;
+  const minutesAfterAlert = investigation && triggeringAlert
+    ? (Date.parse(investigation.window_end) - Date.parse(triggeringAlert.observed_at)) / 60_000
+    : null;
+
   return (
     <main
       id="main-content"
@@ -245,11 +262,12 @@ export default async function Home({ searchParams }: PageProps<"/">) {
           Change. Context. Clarity.
         </p>
         <h1 className="text-4xl font-medium tracking-tight sm:text-5xl">
-          Investigations
+          {hasIncidentId ? "Incidents" : "Investigations"}
         </h1>
         <p className="mt-4 max-w-2xl text-base leading-7 text-muted">
-          Follow the events around a production incident, understand what changed,
-          and keep every investigation grounded in evidence.
+          {hasIncidentId
+            ? "Review a saved incident and its evidence-backed investigation context."
+            : "Follow the events around a production incident, understand what changed, and keep every investigation grounded in evidence."}
         </p>
       </div>
 
@@ -288,15 +306,37 @@ export default async function Home({ searchParams }: PageProps<"/">) {
       )}
 
       {hasTriggerEventId && organizationId !== null && selectedRepository && (
-        <a
-          href={`/?${new URLSearchParams({
-            organizationId: String(organizationId),
-            repositoryId: String(selectedRepository.id),
-          })}`}
-          className="mb-6 inline-flex text-sm font-medium text-accent underline underline-offset-4 hover:text-foreground"
-        >
-          Back to repository timeline
-        </a>
+        <nav aria-label="Breadcrumb" className="mb-8">
+          <ol className="flex flex-wrap items-center gap-3 text-sm">
+            <li>
+              <a
+                href={`/?${new URLSearchParams({
+                  organizationId: String(organizationId),
+                  repositoryId: String(selectedRepository.id),
+                })}`}
+                aria-label="Investigations, back to repository timeline"
+                className="font-medium text-accent underline-offset-4 hover:underline"
+              >
+                Investigations
+              </a>
+            </li>
+            <li className="flex items-center gap-3 text-muted">
+              <svg
+                viewBox="0 0 24 24"
+                className="size-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="m9 5 7 7-7 7" />
+              </svg>
+              <span aria-current="page">Alert #{investigation?.trigger_event_id ?? triggerEventId}</span>
+            </li>
+          </ol>
+        </nav>
       )}
 
       {errorState && (
@@ -310,72 +350,93 @@ export default async function Home({ searchParams }: PageProps<"/">) {
         <section aria-labelledby="investigation-heading">
           <div className="mb-6">
             <p className="mb-3 font-mono text-xs tracking-widest text-accent uppercase">
-              Alert context
+              Alert investigation
             </p>
             <h2
               id="investigation-heading"
-              className="text-2xl font-medium tracking-tight"
+              className="text-3xl font-semibold tracking-tight wrap-anywhere sm:text-4xl"
             >
-              Alert investigation
+              {alertTitle ?? "Alert investigation"}
             </h2>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-muted sm:text-base sm:leading-7">
-              This window covers 30 minutes before and 30 minutes after the
-              triggering alert.
-            </p>
+            {triggeringAlert && (
+              <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-muted">
+                <span className="rounded-md bg-amber-300/10 px-3 py-1.5 text-xs font-medium text-amber-200">
+                  {alertSeverity ? `${alertSeverity} alert` : "Alert"}
+                </span>
+                {selectedRepository && (
+                  <>
+                    <span className="wrap-anywhere">{selectedRepository.name}</span>
+                    <span aria-hidden="true">·</span>
+                  </>
+                )}
+                <time dateTime={triggeringAlert.observed_at}>
+                  {formatUtcTimestamp(triggeringAlert.observed_at)}
+                </time>
+              </div>
+            )}
           </div>
-
-          <dl className="mb-6 grid gap-6 rounded-xl border border-line bg-surface p-6 sm:grid-cols-3 sm:p-8">
-            <div>
-              <dt className="text-sm text-muted">Trigger event ID</dt>
-              <dd className="mt-2 font-mono text-sm">
-                {investigation.trigger_event_id}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-sm text-muted">Investigation start (UTC)</dt>
-              <dd className="mt-2 font-mono text-sm leading-6">
-                <time dateTime={investigation.window_start}>
-                  {formatUtcTimestamp(investigation.window_start)}
-                </time>
-              </dd>
-            </div>
-            <div>
-              <dt className="text-sm text-muted">Investigation end (UTC)</dt>
-              <dd className="mt-2 font-mono text-sm leading-6">
-                <time dateTime={investigation.window_end}>
-                  {formatUtcTimestamp(investigation.window_end)}
-                </time>
-              </dd>
-            </div>
-          </dl>
-
-          <TimelineEventList events={investigation.events} />
 
           {organizationId !== null && selectedRepository && (
             <form
               action={createIncidentAction}
               aria-labelledby="create-incident-heading"
-              className="mt-6 rounded-xl border border-line bg-surface p-6 sm:p-8"
+              className="mt-6 mb-6 flex flex-col gap-6 rounded-xl border border-line bg-surface p-6 sm:flex-row sm:items-center sm:justify-between"
             >
-              <h3 id="create-incident-heading" className="text-lg font-medium">
-                Save this investigation as an incident
-              </h3>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-                Submitting this form saves a real database record with a 30-minute
-                lookback and lookahead. This workflow is for local development
-                only; authentication and authorization are not implemented.
-              </p>
+              <div className="min-w-0">
+                <h3 id="create-incident-heading" className="text-lg font-medium">
+                  Keep this investigation for later
+                </h3>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
+                  Create an incident to keep this alert and its investigation window together for review.
+                </p>
+              </div>
               <input type="hidden" name="organizationId" value={organizationId} />
               <input type="hidden" name="repositoryId" value={selectedRepository.id} />
               <input type="hidden" name="triggerEventId" value={investigation.trigger_event_id} />
               <button
                 type="submit"
-                className="mt-5 min-h-11 cursor-pointer rounded-md bg-accent px-4 py-2 text-sm font-medium text-background hover:bg-accent/90"
+                className="inline-flex min-h-14 shrink-0 cursor-pointer items-center justify-center gap-3 self-end rounded-lg bg-accent px-5 py-3 text-base font-medium text-background transition-colors hover:bg-accent/90 sm:self-auto"
               >
                 Create incident
+                <svg
+                  viewBox="0 0 24 24"
+                  className="size-5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M5 12h14m-6-6 6 6-6 6" />
+                </svg>
               </button>
             </form>
           )}
+
+          <dl className="mb-6 flex flex-col gap-6 rounded-xl border border-line bg-surface p-6 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <dt className="text-sm text-muted">Investigation window</dt>
+              <dd className="mt-2 text-base leading-6 tabular-nums">
+                {formatUtcWindow(investigation.window_start, investigation.window_end)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-sm text-muted">Window around the alert</dt>
+              <dd className="mt-2 text-base leading-6 tabular-nums">
+                {minutesBeforeAlert !== null && minutesAfterAlert !== null
+                  ? `${minutesBeforeAlert} min before · ${minutesAfterAlert} min after`
+                  : "Alert timestamp unavailable"}
+              </dd>
+            </div>
+          </dl>
+
+          <TimelineEventList
+            events={investigation.events}
+            triggerEventId={investigation.trigger_event_id}
+          />
+
+         
         </section>
       )}
 
@@ -384,10 +445,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
           <h2 id="saved-incident-heading" className="text-2xl font-medium tracking-tight">
             Saved incident
           </h2>
-          <p className="mt-3 text-sm leading-6 text-muted">
-            This record was retrieved from the backend. Its context reflects the
-            current events inside its saved investigation window.
-          </p>
+        
           <dl className="my-6 grid gap-6 rounded-xl border border-line bg-surface p-6 sm:grid-cols-3 sm:p-8">
             <div>
               <dt className="text-sm text-muted">Incident ID</dt>
@@ -457,11 +515,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
               <h3 id="resolve-incident-heading" className="text-lg font-medium">
                 Resolve this incident
               </h3>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-                Mark this incident as resolved and save a UTC resolution timestamp.
-                This workflow is for local development only; authentication and
-                authorization are not implemented.
-              </p>
+              
               <input type="hidden" name="organizationId" value={organizationId} />
               <input type="hidden" name="repositoryId" value={selectedRepository.id} />
               <input type="hidden" name="incidentId" value={savedIncident.id} />

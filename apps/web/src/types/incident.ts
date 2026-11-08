@@ -12,3 +12,13 @@ export type IncidentPreview = {
   created_at: string;
   context: InvestigationContextPreview;
 };
+
+// Display fields from IncidentSummaryRead; generate API types from OpenAPI later.
+export type IncidentSummaryPreview = Pick<
+  IncidentPreview,
+  "id" | "repository_id" | "trigger_timeline_event_id" | "status" | "created_at"
+> & {
+  title: string;
+  repository_name: string;
+  alert_observed_at: string;
+};

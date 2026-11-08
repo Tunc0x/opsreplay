@@ -23,3 +23,14 @@ class IncidentRead(BaseModel):
     resolved_at: datetime | None
     created_at: datetime
     context: InvestigationContextRead
+
+
+class IncidentSummaryRead(BaseModel):
+    id: int
+    repository_id: int
+    trigger_timeline_event_id: int
+    title: str
+    repository_name: str
+    alert_observed_at: datetime
+    created_at: datetime
+    status: str

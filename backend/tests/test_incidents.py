@@ -93,6 +93,117 @@ def parse_time(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
+def test_list_incidents_returns_trigger_summaries_for_selected_repository(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    organization = create_organization(db_session)
+    repository = create_repository(db_session, organization, "payments-api")
+    other_repository = create_repository(db_session, organization, "other-api")
+    older_trigger, _ = add_alert_event(
+        db_session, repository, "incident-list-older", TRIGGER_TIME,
+    )
+    newer_trigger, _ = add_alert_event(
+        db_session, repository, "incident-list-newer", TRIGGER_TIME + timedelta(hours=1),
+    )
+    other_trigger, _ = add_alert_event(
+        db_session, other_repository, "incident-list-other", TRIGGER_TIME,
+    )
+    older_trigger.summary = "CRITICAL: Payment requests are failing"
+    newer_trigger.summary = "WARNING: Payment latency increased"
+    older = Incident(
+        repository_id=repository.id,
+        trigger_timeline_event_id=older_trigger.id,
+        lookback_minutes=30,
+        lookahead_minutes=30,
+        created_at=TRIGGER_TIME + timedelta(minutes=5),
+    )
+    newer = Incident(
+        repository_id=repository.id,
+        trigger_timeline_event_id=newer_trigger.id,
+        lookback_minutes=30,
+        lookahead_minutes=30,
+        status="resolved",
+        resolved_at=TRIGGER_TIME + timedelta(hours=2),
+        created_at=TRIGGER_TIME + timedelta(hours=1, minutes=5),
+    )
+    db_session.add_all([
+        older,
+        newer,
+        Incident(
+            repository_id=other_repository.id,
+            trigger_timeline_event_id=other_trigger.id,
+            lookback_minutes=30,
+            lookahead_minutes=30,
+        ),
+    ])
+    db_session.commit()
+
+    response = client.get(
+        f"/organizations/{organization.id}/repositories/{repository.id}/incidents"
+    )
+
+    assert response.status_code == 200
+    results = response.json()
+    assert [result["id"] for result in results] == [newer.id, older.id]
+    for result, incident, trigger in zip(
+        results, [newer, older], [newer_trigger, older_trigger], strict=True,
+    ):
+        assert set(result) == {
+            "id", "repository_id", "trigger_timeline_event_id", "title",
+            "repository_name", "alert_observed_at", "created_at", "status",
+        }
+        assert result["repository_id"] == repository.id
+        assert result["trigger_timeline_event_id"] == trigger.id
+        assert result["title"] == trigger.summary
+        assert result["repository_name"] == repository.name
+        assert parse_time(result["alert_observed_at"]) == trigger.observed_at
+        assert parse_time(result["created_at"]) == incident.created_at
+        assert result["status"] == incident.status
+
+
+def test_list_incidents_for_empty_repository_returns_empty_list(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    organization = create_organization(db_session)
+    repository = create_repository(db_session, organization, "empty-api")
+    db_session.commit()
+
+    response = client.get(
+        f"/organizations/{organization.id}/repositories/{repository.id}/incidents"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_list_incidents_for_missing_organization_returns_404(
+    client: TestClient,
+) -> None:
+    response = client.get("/organizations/999999/repositories/999999/incidents")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Organization not found"}
+
+
+def test_list_incidents_rejects_repository_outside_organization(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    organization_a = create_organization(db_session)
+    organization_b = create_organization(db_session)
+    repository = create_repository(db_session, organization_a, "private-api")
+    db_session.commit()
+
+    for repository_id in (repository.id, 999999):
+        response = client.get(
+            f"/organizations/{organization_b.id}/repositories/{repository_id}/incidents"
+        )
+        assert response.status_code == 404
+        assert response.json() == {"detail": "Repository not found"}
+
+
 def test_create_incident_from_alert_persists_window_and_context(
     client: TestClient,
     db_session: Session,

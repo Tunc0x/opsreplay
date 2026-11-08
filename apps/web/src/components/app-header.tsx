@@ -1,7 +1,12 @@
+import { Suspense } from "react";
+import Link from "next/link";
+
+import { HeaderNavigation } from "@/components/header-navigation";
+
 export function AppHeader() {
   return (
     <header className="border-b border-line">
-      <div className="mx-auto flex w-full max-w-6xl items-center px-6 py-5 sm:px-8">
+      <div className="mx-auto flex w-full max-w-6xl flex-col items-start gap-4 px-6 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-8">
         <span className="inline-flex items-center gap-2 text-xl font-semibold tracking-tight">
           <svg
             viewBox="0 0 40 40"
@@ -20,6 +25,14 @@ export function AppHeader() {
           </svg>
           OpsReplay
         </span>
+        <Suspense fallback={
+          <nav aria-label="Application navigation" className="flex gap-6 py-2 text-sm font-medium text-muted">
+            <Link href="/" prefetch={false}>Investigations</Link>
+            <Link href="/incidents" prefetch={false}>Incidents</Link>
+          </nav>
+        }>
+          <HeaderNavigation />
+        </Suspense>
       </div>
     </header>
   );

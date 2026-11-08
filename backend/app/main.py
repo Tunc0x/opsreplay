@@ -24,7 +24,7 @@ from app.models.timeline_event import TimelineEvent
 from app.models.webhook_delivery import WebhookDelivery
 from app.routers.alert_webhook import router as alert_webhook_router
 from app.routers.github_webhook import router as github_webhook_router
-from app.schemas.incident import IncidentCreate, IncidentRead
+from app.schemas.incident import IncidentCreate, IncidentRead, IncidentSummaryRead
 from app.schemas.investigation import InvestigationContextRead
 from app.schemas.organization import OrganizationCreate, OrganizationRead
 from app.schemas.postmortem import (
@@ -575,6 +575,52 @@ def get_investigation_context(
         lookback_minutes,
         lookahead_minutes,
     )
+
+
+@app.get(
+    "/organizations/{organization_id}/repositories/{repository_id}/incidents",
+    response_model=list[IncidentSummaryRead],
+)
+def list_incidents(
+    organization_id: int,
+    repository_id: int,
+    session: Session = Depends(get_db_session),
+) -> list[IncidentSummaryRead]:
+    organization = session.get(Organization, organization_id)
+    if organization is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    repository = session.scalar(
+        select(Repository).where(
+            Repository.id == repository_id,
+            Repository.organization_id == organization_id,
+        )
+    )
+    if repository is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    rows = session.execute(
+        select(Incident, TimelineEvent.summary, TimelineEvent.observed_at)
+        .join(TimelineEvent, Incident.trigger_timeline_event_id == TimelineEvent.id)
+        .where(
+            Incident.repository_id == repository_id,
+            TimelineEvent.repository_id == repository_id,
+        )
+        .order_by(Incident.created_at.desc(), Incident.id.desc())
+    )
+    return [
+        IncidentSummaryRead(
+            id=incident.id,
+            repository_id=incident.repository_id,
+            trigger_timeline_event_id=incident.trigger_timeline_event_id,
+            title=summary,
+            repository_name=repository.name,
+            alert_observed_at=observed_at,
+            created_at=incident.created_at,
+            status=incident.status,
+        )
+        for incident, summary, observed_at in rows
+    ]
 
 
 @app.post(

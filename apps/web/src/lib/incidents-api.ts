@@ -169,3 +169,44 @@ export async function fetchIncident(
   if (incident.id !== incidentId) throw new IncidentApiError("invalid-response");
   return incident;
 }
+
+export async function resolveIncident(
+  organizationId: number,
+  repositoryId: number,
+  incidentId: number,
+): Promise<IncidentPreview> {
+  const apiBaseUrl = process.env.OPSREPLAY_API_BASE_URL?.trim();
+  if (!apiBaseUrl) throw new IncidentApiError("unavailable");
+
+  const url = `${apiBaseUrl.replace(/\/+$/, "")}/organizations/${organizationId}/repositories/${repositoryId}/incidents/${incidentId}/resolve`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      cache: "no-store",
+      redirect: "error",
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    // A lost response does not establish whether the update committed.
+    throw new IncidentApiError("uncertain");
+  }
+
+  if (response.status === 404) throw new IncidentApiError("not-found");
+  if (response.status !== 200) throw new IncidentApiError("http-error");
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch (error) {
+    throw new IncidentApiError(
+      error instanceof SyntaxError ? "invalid-response" : "uncertain",
+    );
+  }
+
+  const incident = parseIncident(payload, repositoryId);
+  if (incident.id !== incidentId || incident.status !== "resolved") {
+    throw new IncidentApiError("invalid-response");
+  }
+  return incident;
+}

@@ -1,11 +1,15 @@
 import { createIncidentAction } from "@/app/actions/create-incident";
+import { resolveIncidentAction } from "@/app/actions/resolve-incident";
 import { EmptyState } from "@/components/empty-state";
 import { RepositorySelector } from "@/components/repository-selector";
 import { TimelineEventList } from "@/components/timeline-event-list";
 import { exampleTimelineEvents } from "@/data/example-timeline";
 import { formatUtcTimestamp } from "@/lib/format-time";
 import { parsePositiveId } from "@/lib/ids";
-import { getIncidentCreationFeedback } from "@/lib/incident-feedback";
+import {
+  getIncidentCreationFeedback,
+  getIncidentResolutionFeedback,
+} from "@/lib/incident-feedback";
 import { fetchIncident, IncidentApiError } from "@/lib/incidents-api";
 import {
   fetchInvestigationContext,
@@ -34,6 +38,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
   const incidentId = parsePositiveId(params.incidentId);
   const hasIncidentId = params.incidentId !== undefined;
   const creationFeedback = getIncidentCreationFeedback(params.incidentError);
+  const resolutionFeedback = getIncidentResolutionFeedback(params.resolutionError);
   let repositories: RepositoryOption[] | null = null;
   let selectedRepository: RepositoryOption | undefined;
   let events: TimelineEventPreview[] = isExample ? exampleTimelineEvents : [];
@@ -268,6 +273,20 @@ export default async function Home({ searchParams }: PageProps<"/">) {
         </section>
       )}
 
+      {resolutionFeedback && (
+        <section
+          aria-labelledby="resolution-feedback-heading"
+          className="mb-6 rounded-xl border border-line bg-surface p-6"
+        >
+          <h2 id="resolution-feedback-heading" className="text-lg font-medium">
+            {resolutionFeedback.title}
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-muted">
+            {resolutionFeedback.description}
+          </p>
+        </section>
+      )}
+
       {hasTriggerEventId && organizationId !== null && selectedRepository && (
         <a
           href={`/?${new URLSearchParams({
@@ -376,7 +395,17 @@ export default async function Home({ searchParams }: PageProps<"/">) {
             </div>
             <div>
               <dt className="text-sm text-muted">Status</dt>
-              <dd className="mt-2 text-sm">{savedIncident.status}</dd>
+              <dd className="mt-2">
+                <span
+                  className={`inline-flex rounded-md border px-2 py-1 text-sm font-medium ${
+                    savedIncident.status === "resolved"
+                      ? "border-accent/20 bg-accent/10 text-accent"
+                      : "border-amber-300/20 bg-amber-300/10 text-amber-200"
+                  }`}
+                >
+                  {savedIncident.status === "resolved" ? "Resolved" : "Open"}
+                </span>
+              </dd>
             </div>
             <div>
               <dt className="text-sm text-muted">Trigger event ID</dt>
@@ -418,6 +447,39 @@ export default async function Home({ searchParams }: PageProps<"/">) {
             View triggering alert investigation
           </a>
           <TimelineEventList events={savedIncident.context.events} />
+
+          {savedIncident.status === "open" ? (
+            <form
+              action={resolveIncidentAction}
+              aria-labelledby="resolve-incident-heading"
+              className="mt-6 rounded-xl border border-line bg-surface p-6 sm:p-8"
+            >
+              <h3 id="resolve-incident-heading" className="text-lg font-medium">
+                Resolve this incident
+              </h3>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
+                Mark this incident as resolved and save a UTC resolution timestamp.
+                This workflow is for local development only; authentication and
+                authorization are not implemented.
+              </p>
+              <input type="hidden" name="organizationId" value={organizationId} />
+              <input type="hidden" name="repositoryId" value={selectedRepository.id} />
+              <input type="hidden" name="incidentId" value={savedIncident.id} />
+              <button
+                type="submit"
+                className="mt-5 min-h-11 cursor-pointer rounded-md bg-accent px-4 py-2 text-sm font-medium text-background hover:bg-accent/90"
+              >
+                Resolve incident
+              </button>
+            </form>
+          ) : (
+            <p
+              role="status"
+              className="mt-6 rounded-xl border border-accent/20 bg-accent/5 p-6 text-sm leading-6 text-accent"
+            >
+              This incident has been resolved.
+            </p>
+          )}
         </section>
       )}
 

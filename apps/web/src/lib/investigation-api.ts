@@ -60,6 +60,14 @@ export async function fetchInvestigationContext(
     );
   }
 
+  return parseInvestigationContext(payload, repositoryId, triggerEventId);
+}
+
+export function parseInvestigationContext(
+  payload: unknown,
+  repositoryId: number,
+  triggerEventId: number,
+): InvestigationContextPreview {
   if (
     typeof payload !== "object" ||
     payload === null ||

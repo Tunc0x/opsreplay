@@ -1,8 +1,12 @@
+import { createIncidentAction } from "@/app/actions/create-incident";
 import { EmptyState } from "@/components/empty-state";
 import { RepositorySelector } from "@/components/repository-selector";
 import { TimelineEventList } from "@/components/timeline-event-list";
 import { exampleTimelineEvents } from "@/data/example-timeline";
 import { formatUtcTimestamp } from "@/lib/format-time";
+import { parsePositiveId } from "@/lib/ids";
+import { getIncidentCreationFeedback } from "@/lib/incident-feedback";
+import { fetchIncident, IncidentApiError } from "@/lib/incidents-api";
 import {
   fetchInvestigationContext,
   InvestigationApiError,
@@ -10,38 +14,44 @@ import {
 import { fetchRepositories, RepositoriesApiError } from "@/lib/repositories-api";
 import { fetchRepositoryTimeline, TimelineApiError } from "@/lib/timeline-api";
 import type { InvestigationContextPreview } from "@/types/investigation";
+import type { IncidentPreview } from "@/types/incident";
 import type { RepositoryOption } from "@/types/repository";
 import type { TimelineEventPreview } from "@/types/timeline";
 
-// accept the value only if it is a positive, safe integer
-function parsePositiveId(value: string | string[] | undefined): number | null {
-  if (typeof value !== "string" || !/^\d+$/.test(value)) {
-    return null;
-  }
-
-  const id = Number(value);
-  return Number.isSafeInteger(id) && id > 0 ? id : null;
-}
 // searchParams contains the URL query parameters. e.g. /?organizationId=1&repositoryId=5
 export default async function Home({ searchParams }: PageProps<"/">) {
   const params = await searchParams;
   const isExample =
     params.organizationId === undefined &&
     params.repositoryId === undefined &&
-    params.triggerEventId === undefined;
+    params.triggerEventId === undefined &&
+    params.incidentId === undefined;
   const organizationId = parsePositiveId(params.organizationId);
   const repositoryId = parsePositiveId(params.repositoryId);
   const hasRepositoryId = params.repositoryId !== undefined;
   const triggerEventId = parsePositiveId(params.triggerEventId);
   const hasTriggerEventId = params.triggerEventId !== undefined;
+  const incidentId = parsePositiveId(params.incidentId);
+  const hasIncidentId = params.incidentId !== undefined;
+  const creationFeedback = getIncidentCreationFeedback(params.incidentError);
   let repositories: RepositoryOption[] | null = null;
   let selectedRepository: RepositoryOption | undefined;
   let events: TimelineEventPreview[] = isExample ? exampleTimelineEvents : [];
   let investigation: InvestigationContextPreview | null = null;
+  let savedIncident: IncidentPreview | null = null;
   let errorState: { title: string; description: string } | null = null;
 
   if (!isExample) {
     if (
+      hasIncidentId &&
+      (hasTriggerEventId || incidentId === null || organizationId === null || repositoryId === null)
+    ) {
+      errorState = {
+        title: "Invalid saved incident selection",
+        description:
+          "Provide one positive, safe integer each for organizationId, repositoryId and incidentId. Do not combine incidentId with triggerEventId.",
+      };
+    } else if (
       hasTriggerEventId &&
       (triggerEventId === null || organizationId === null || repositoryId === null)
     ) {
@@ -102,7 +112,13 @@ export default async function Home({ searchParams }: PageProps<"/">) {
           };
         } else {
           try {
-            if (triggerEventId !== null) {
+            if (incidentId !== null) {
+              savedIncident = await fetchIncident(
+                organizationId,
+                selectedRepository.id,
+                incidentId,
+              );
+            } else if (triggerEventId !== null) {
               investigation = await fetchInvestigationContext(
                 organizationId,
                 selectedRepository.id,
@@ -115,7 +131,33 @@ export default async function Home({ searchParams }: PageProps<"/">) {
               );
             }
           } catch (error) {
-            if (error instanceof InvestigationApiError) {
+            if (error instanceof IncidentApiError) {
+              switch (error.kind) {
+                case "not-found":
+                  errorState = {
+                    title: "Incident not found",
+                    description: "The saved incident is not available under this organization and repository.",
+                  };
+                  break;
+                case "invalid-response":
+                  errorState = {
+                    title: "Invalid incident data",
+                    description: "The backend returned an unexpected saved incident response. Try again later.",
+                  };
+                  break;
+                case "http-error":
+                  errorState = {
+                    title: "Incident request failed",
+                    description: "The backend could not return this saved incident. Try again later.",
+                  };
+                  break;
+                default:
+                  errorState = {
+                    title: "Saved incident is unavailable",
+                    description: "Check that the backend is running and OPSREPLAY_API_BASE_URL is configured, then reload this page.",
+                  };
+              }
+            } else if (error instanceof InvestigationApiError) {
               switch (error.kind) {
                 case "not-eligible":
                   errorState = {
@@ -172,9 +214,11 @@ export default async function Home({ searchParams }: PageProps<"/">) {
               };
             } else {
               errorState = {
-                title: hasTriggerEventId
-                  ? "Investigation context is unavailable"
-                  : "Repository timeline is unavailable",
+                title: hasIncidentId
+                  ? "Saved incident is unavailable"
+                  : hasTriggerEventId
+                    ? "Investigation context is unavailable"
+                    : "Repository timeline is unavailable",
                 description:
                   "The timeline could not be loaded. Check that the backend is running and OPSREPLAY_API_BASE_URL is configured for the Next.js server, then reload this page.",
               };
@@ -210,6 +254,20 @@ export default async function Home({ searchParams }: PageProps<"/">) {
         selectedRepositoryId={selectedRepository?.id ?? null}
       />
 
+      {creationFeedback && (
+        <section
+          aria-labelledby="incident-feedback-heading"
+          className="mb-6 rounded-xl border border-line bg-surface p-6"
+        >
+          <h2 id="incident-feedback-heading" className="text-lg font-medium">
+            {creationFeedback.title}
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-muted">
+            {creationFeedback.description}
+          </p>
+        </section>
+      )}
+
       {hasTriggerEventId && organizationId !== null && selectedRepository && (
         <a
           href={`/?${new URLSearchParams({
@@ -233,7 +291,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
         <section aria-labelledby="investigation-heading">
           <div className="mb-6">
             <p className="mb-3 font-mono text-xs tracking-widest text-accent uppercase">
-              Read-only context
+              Alert context
             </p>
             <h2
               id="investigation-heading"
@@ -273,10 +331,97 @@ export default async function Home({ searchParams }: PageProps<"/">) {
           </dl>
 
           <TimelineEventList events={investigation.events} />
+
+          {organizationId !== null && selectedRepository && (
+            <form
+              action={createIncidentAction}
+              aria-labelledby="create-incident-heading"
+              className="mt-6 rounded-xl border border-line bg-surface p-6 sm:p-8"
+            >
+              <h3 id="create-incident-heading" className="text-lg font-medium">
+                Save this investigation as an incident
+              </h3>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
+                Submitting this form saves a real database record with a 30-minute
+                lookback and lookahead. This workflow is for local development
+                only; authentication and authorization are not implemented.
+              </p>
+              <input type="hidden" name="organizationId" value={organizationId} />
+              <input type="hidden" name="repositoryId" value={selectedRepository.id} />
+              <input type="hidden" name="triggerEventId" value={investigation.trigger_event_id} />
+              <button
+                type="submit"
+                className="mt-5 min-h-11 cursor-pointer rounded-md bg-accent px-4 py-2 text-sm font-medium text-background hover:bg-accent/90"
+              >
+                Create incident
+              </button>
+            </form>
+          )}
         </section>
       )}
 
-      {!errorState && !investigation && (isExample || selectedRepository) && (
+      {!errorState && savedIncident && organizationId !== null && selectedRepository && (
+        <section aria-labelledby="saved-incident-heading">
+          <h2 id="saved-incident-heading" className="text-2xl font-medium tracking-tight">
+            Saved incident
+          </h2>
+          <p className="mt-3 text-sm leading-6 text-muted">
+            This record was retrieved from the backend. Its context reflects the
+            current events inside its saved investigation window.
+          </p>
+          <dl className="my-6 grid gap-6 rounded-xl border border-line bg-surface p-6 sm:grid-cols-3 sm:p-8">
+            <div>
+              <dt className="text-sm text-muted">Incident ID</dt>
+              <dd className="mt-2 font-mono text-sm">{savedIncident.id}</dd>
+            </div>
+            <div>
+              <dt className="text-sm text-muted">Status</dt>
+              <dd className="mt-2 text-sm">{savedIncident.status}</dd>
+            </div>
+            <div>
+              <dt className="text-sm text-muted">Trigger event ID</dt>
+              <dd className="mt-2 font-mono text-sm">{savedIncident.trigger_timeline_event_id}</dd>
+            </div>
+            <div>
+              <dt className="text-sm text-muted">Created (UTC)</dt>
+              <dd className="mt-2 font-mono text-sm leading-6">
+                <time dateTime={savedIncident.created_at}>
+                  {formatUtcTimestamp(savedIncident.created_at)}
+                </time>
+              </dd>
+            </div>
+            <div>
+              <dt className="text-sm text-muted">Investigation window</dt>
+              <dd className="mt-2 text-sm leading-6">
+                {savedIncident.lookback_minutes} minutes before / {savedIncident.lookahead_minutes} minutes after
+              </dd>
+            </div>
+            <div>
+              <dt className="text-sm text-muted">Resolution state</dt>
+              <dd className="mt-2 text-sm leading-6">
+                {savedIncident.resolved_at === null ? "Unresolved" : (
+                  <time dateTime={savedIncident.resolved_at}>
+                    Resolved {formatUtcTimestamp(savedIncident.resolved_at)}
+                  </time>
+                )}
+              </dd>
+            </div>
+          </dl>
+          <a
+            href={`/?${new URLSearchParams({
+              organizationId: String(organizationId),
+              repositoryId: String(selectedRepository.id),
+              triggerEventId: String(savedIncident.trigger_timeline_event_id),
+            })}`}
+            className="mb-6 inline-flex text-sm font-medium text-accent underline underline-offset-4 hover:text-foreground"
+          >
+            View triggering alert investigation
+          </a>
+          <TimelineEventList events={savedIncident.context.events} />
+        </section>
+      )}
+
+      {!errorState && !investigation && !savedIncident && (isExample || selectedRepository) && (
         <section aria-labelledby="timeline-heading">
           <div className="mb-6">
             <p className="mb-3 font-mono text-xs tracking-widest text-accent uppercase">

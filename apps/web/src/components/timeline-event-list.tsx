@@ -5,6 +5,7 @@ import type { TimelineEventPreview } from "@/types/timeline";
 type TimelineEventListProps = {
   events: readonly TimelineEventPreview[];
   triggerEventId?: number;
+  eventIdPrefix?: string;
   repositoryContext?: {
     organizationId: number;
     repositoryId: number;
@@ -14,6 +15,7 @@ type TimelineEventListProps = {
 export function TimelineEventList({
   events,
   triggerEventId,
+  eventIdPrefix,
   repositoryContext,
 }: TimelineEventListProps) {
   if (events.length === 0) {
@@ -51,7 +53,9 @@ export function TimelineEventList({
         return (
           <li
             key={event.id}
-            className={`flex flex-col gap-3 px-5 py-6 sm:grid sm:grid-cols-[13rem_1fr] sm:gap-6 sm:px-6 ${isTrigger ? "bg-amber-300/5 ring-1 ring-amber-300/20 ring-inset first:rounded-t-xl last:rounded-b-xl" : ""}`}
+            id={eventIdPrefix ? `${eventIdPrefix}-${event.id}` : undefined}
+            tabIndex={eventIdPrefix ? -1 : undefined}
+            className={`flex flex-col gap-3 px-5 py-6 sm:grid sm:grid-cols-[13rem_1fr] sm:gap-6 sm:px-6 ${eventIdPrefix ? "scroll-mt-6 target:bg-accent/5" : ""} ${isTrigger ? "bg-amber-300/5 ring-1 ring-amber-300/20 ring-inset first:rounded-t-xl last:rounded-b-xl" : ""}`}
           >
             <time
               dateTime={event.observed_at}
@@ -61,6 +65,9 @@ export function TimelineEventList({
             </time>
             <div className="min-w-0">
               <div className="mb-3 flex flex-wrap items-center gap-3">
+                {eventIdPrefix && (
+                  <span className="font-mono text-xs text-muted">Event #{event.id}</span>
+                )}
                 <span
                   className={`rounded-md border px-2 py-1 text-xs font-medium ${badgeClasses}`}
                 >

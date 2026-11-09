@@ -1,6 +1,7 @@
 import { createIncidentAction } from "@/app/actions/create-incident";
 import { resolveIncidentAction } from "@/app/actions/resolve-incident";
 import { EmptyState } from "@/components/empty-state";
+import { PostmortemDraft } from "@/components/postmortem-draft";
 import { RepositorySelector } from "@/components/repository-selector";
 import { TimelineEventList } from "@/components/timeline-event-list";
 import { exampleTimelineEvents } from "@/data/example-timeline";
@@ -11,6 +12,7 @@ import {
   getIncidentResolutionFeedback,
 } from "@/lib/incident-feedback";
 import { fetchIncident, IncidentApiError } from "@/lib/incidents-api";
+import { fetchPostmortemDraft, PostmortemApiError } from "@/lib/postmortem-api";
 import {
   fetchInvestigationContext,
   InvestigationApiError,
@@ -19,6 +21,7 @@ import { fetchRepositories, RepositoriesApiError } from "@/lib/repositories-api"
 import { fetchRepositoryTimeline, TimelineApiError } from "@/lib/timeline-api";
 import type { InvestigationContextPreview } from "@/types/investigation";
 import type { IncidentPreview } from "@/types/incident";
+import type { PostmortemDraftPreview } from "@/types/postmortem";
 import type { RepositoryOption } from "@/types/repository";
 import type { TimelineEventPreview } from "@/types/timeline";
 
@@ -230,6 +233,41 @@ export default async function Home({ searchParams }: PageProps<"/">) {
             }
           }
         }
+      }
+    }
+  }
+
+  let postmortem: PostmortemDraftPreview | null = null;
+  let postmortemNotice: { title: string; description: string } | null = null;
+  if (savedIncident?.status === "open") {
+    postmortemNotice = {
+      title: "Postmortem draft",
+      description: "Postmortem generation requires a resolved incident. Saved drafts are displayed here after resolution.",
+    };
+  } else if (!errorState && savedIncident?.status === "resolved" && organizationId !== null && selectedRepository) {
+    try {
+      postmortem = await fetchPostmortemDraft(organizationId, selectedRepository.id, savedIncident.id);
+    } catch (error) {
+      if (error instanceof PostmortemApiError && error.kind === "not-found") {
+        postmortemNotice = {
+          title: "Postmortem draft",
+          description: "No postmortem draft has been generated for this incident yet.",
+        };
+      } else if (error instanceof PostmortemApiError && error.kind === "invalid-response") {
+        postmortemNotice = {
+          title: "Invalid postmortem data",
+          description: "The backend returned a draft with invalid content or evidence references. The draft cannot be displayed.",
+        };
+      } else if (error instanceof PostmortemApiError && error.kind === "http-error") {
+        postmortemNotice = {
+          title: "Postmortem request failed",
+          description: "The backend could not return the saved draft. Try reloading this page later.",
+        };
+      } else {
+        postmortemNotice = {
+          title: "Postmortem draft unavailable",
+          description: "The saved draft could not be loaded. Check the backend connection and reload this page.",
+        };
       }
     }
   }
@@ -533,6 +571,15 @@ export default async function Home({ searchParams }: PageProps<"/">) {
             >
               This incident has been resolved.
             </p>
+          )}
+
+          {postmortem ? (
+            <PostmortemDraft postmortem={postmortem} />
+          ) : postmortemNotice && (
+            <section aria-labelledby="postmortem-notice-heading" className="mt-8 rounded-xl border border-line bg-surface p-6 sm:p-8">
+              <h3 id="postmortem-notice-heading" className="text-lg font-medium">{postmortemNotice.title}</h3>
+              <p className="mt-2 text-sm leading-6 text-muted">{postmortemNotice.description}</p>
+            </section>
           )}
         </section>
       )}

@@ -1,6 +1,8 @@
 import { createIncidentAction } from "@/app/actions/create-incident";
+import { generatePostmortemAction } from "@/app/actions/generate-postmortem";
 import { resolveIncidentAction } from "@/app/actions/resolve-incident";
 import { EmptyState } from "@/components/empty-state";
+import { GeneratePostmortemButton } from "@/components/generate-postmortem-button";
 import { PostmortemDraft } from "@/components/postmortem-draft";
 import { RepositorySelector } from "@/components/repository-selector";
 import { TimelineEventList } from "@/components/timeline-event-list";
@@ -10,6 +12,7 @@ import { parsePositiveId } from "@/lib/ids";
 import {
   getIncidentCreationFeedback,
   getIncidentResolutionFeedback,
+  getPostmortemGenerationFeedback,
 } from "@/lib/incident-feedback";
 import { fetchIncident, IncidentApiError } from "@/lib/incidents-api";
 import { fetchPostmortemDraft, PostmortemApiError } from "@/lib/postmortem-api";
@@ -42,6 +45,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
   const hasIncidentId = params.incidentId !== undefined;
   const creationFeedback = getIncidentCreationFeedback(params.incidentError);
   const resolutionFeedback = getIncidentResolutionFeedback(params.resolutionError);
+  const generationFeedback = getPostmortemGenerationFeedback(params.postmortemError);
   let repositories: RepositoryOption[] | null = null;
   let selectedRepository: RepositoryOption | undefined;
   let events: TimelineEventPreview[] = isExample ? exampleTimelineEvents : [];
@@ -238,6 +242,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
   }
 
   let postmortem: PostmortemDraftPreview | null = null;
+  let postmortemMissing = false;
   let postmortemNotice: { title: string; description: string } | null = null;
   if (savedIncident?.status === "open") {
     postmortemNotice = {
@@ -249,6 +254,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
       postmortem = await fetchPostmortemDraft(organizationId, selectedRepository.id, savedIncident.id);
     } catch (error) {
       if (error instanceof PostmortemApiError && error.kind === "not-found") {
+        postmortemMissing = true;
         postmortemNotice = {
           title: "Postmortem draft",
           description: "No postmortem draft has been generated for this incident yet.",
@@ -340,6 +346,13 @@ export default async function Home({ searchParams }: PageProps<"/">) {
           <p className="mt-2 text-sm leading-6 text-muted">
             {resolutionFeedback.description}
           </p>
+        </section>
+      )}
+
+      {generationFeedback && !postmortem && (
+        <section aria-labelledby="postmortem-feedback-heading" className="mb-6 rounded-xl border border-line bg-surface p-6">
+          <h2 id="postmortem-feedback-heading" className="text-lg font-medium">{generationFeedback.title}</h2>
+          <p className="mt-2 text-sm leading-6 text-muted">{generationFeedback.description}</p>
         </section>
       )}
 
@@ -579,6 +592,17 @@ export default async function Home({ searchParams }: PageProps<"/">) {
             <section aria-labelledby="postmortem-notice-heading" className="mt-8 rounded-xl border border-line bg-surface p-6 sm:p-8">
               <h3 id="postmortem-notice-heading" className="text-lg font-medium">{postmortemNotice.title}</h3>
               <p className="mt-2 text-sm leading-6 text-muted">{postmortemNotice.description}</p>
+              {savedIncident.status === "resolved" && postmortemMissing && (
+                <form action={generatePostmortemAction} className="mt-5 border-t border-line pt-5">
+                  <input type="hidden" name="organizationId" value={organizationId} />
+                  <input type="hidden" name="repositoryId" value={selectedRepository.id} />
+                  <input type="hidden" name="incidentId" value={savedIncident.id} />
+                  <p id="postmortem-generation-help" className="max-w-2xl text-sm leading-6 text-muted">
+                    Create an AI draft from this incident&apos;s recorded evidence. Generation may incur API charges. Use non-sensitive test data only during local development.
+                  </p>
+                  <GeneratePostmortemButton />
+                </form>
+              )}
             </section>
           )}
         </section>

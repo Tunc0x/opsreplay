@@ -82,3 +82,47 @@ export function getIncidentResolutionFeedback(value: unknown) {
 
   return resolutionFeedback[value as IncidentResolutionErrorCode];
 }
+
+const postmortemFeedback = {
+  "invalid-selection": {
+    title: "Invalid postmortem selection",
+    description: "Submit exactly one positive, safe integer for the organization, repository and incident. Open the saved incident and try again.",
+  },
+  "not-found": {
+    title: "Postmortem generation resource not found",
+    description: "The generation request could not find the selected organization, repository or incident. Check the selected incident.",
+  },
+  "not-resolved": {
+    title: "Incident resolution is required",
+    description: "The generation request was rejected because the incident was not resolved. Resolve it and reload the saved incident before continuing.",
+  },
+  "not-configured": {
+    title: "Postmortem generation is not configured",
+    description: "The backend is not configured to generate drafts. Configure it before submitting again.",
+  },
+  "generation-failed": {
+    title: "Postmortem generation failed",
+    description: "The backend could not generate a valid evidence-grounded draft. Review the incident evidence before trying again.",
+  },
+  unavailable: {
+    title: "Postmortem generation is unavailable",
+    description: "No generation request was sent. Check the Next.js backend configuration and reload the incident.",
+  },
+  "unexpected-response": {
+    title: "Postmortem generation could not be confirmed",
+    description: "The backend returned an unexpected HTTP response. Reload this incident to check whether a draft was saved before submitting again.",
+  },
+  uncertain: {
+    title: "Postmortem generation could not be confirmed",
+    description: "The draft may already have been saved. Reload this incident and check for a saved draft before submitting again. No automatic retry was made.",
+  },
+};
+
+export type PostmortemGenerationErrorCode = keyof typeof postmortemFeedback;
+
+export function getPostmortemGenerationFeedback(value: unknown) {
+  if (typeof value !== "string" || !Object.hasOwn(postmortemFeedback, value)) {
+    return null;
+  }
+  return postmortemFeedback[value as PostmortemGenerationErrorCode];
+}

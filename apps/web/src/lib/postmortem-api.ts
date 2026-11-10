@@ -6,9 +6,11 @@ import type { GroundedStatement, PostmortemDraftPreview } from "@/types/postmort
 
 export class PostmortemApiError extends Error {
   constructor(
-    public readonly kind: "not-found" | "http-error" | "unavailable" | "invalid-response",
+    public readonly kind:
+      | "not-found" | "http-error" | "unavailable" | "invalid-response"
+      | "invalid-request" | "not-resolved" | "not-configured" | "generation-failed" | "uncertain",
   ) {
-    super("The saved postmortem draft could not be loaded");
+    super("The postmortem request could not be completed");
     this.name = "PostmortemApiError";
   }
 }
@@ -125,4 +127,43 @@ export async function fetchPostmortemDraft(
     );
   }
   return parsePostmortemDraft(payload, incidentId);
+}
+
+export async function generatePostmortemDraft(
+  organizationId: number,
+  repositoryId: number,
+  incidentId: number,
+): Promise<PostmortemDraftPreview> {
+  if (![organizationId, repositoryId, incidentId].every(isPositiveSafeInteger)) {
+    throw new PostmortemApiError("invalid-request");
+  }
+  const apiBaseUrl = process.env.OPSREPLAY_API_BASE_URL?.trim();
+  if (!apiBaseUrl) throw new PostmortemApiError("unavailable");
+
+  const url = `${apiBaseUrl.replace(/\/+$/, "")}/organizations/${organizationId}/repositories/${repositoryId}/incidents/${incidentId}/postmortem-draft`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      cache: "no-store",
+      redirect: "error",
+      signal: AbortSignal.timeout(120_000),
+    });
+  } catch {
+    // A timeout or lost response does not establish whether the draft was saved.
+    throw new PostmortemApiError("uncertain");
+  }
+  if (response.status === 404) throw new PostmortemApiError("not-found");
+  if (response.status === 409) throw new PostmortemApiError("not-resolved");
+  if (response.status === 503) throw new PostmortemApiError("not-configured");
+  if (response.status === 502) throw new PostmortemApiError("generation-failed");
+  if (response.status !== 200) throw new PostmortemApiError("http-error");
+
+  try {
+    const payload: unknown = await response.json();
+    return parsePostmortemDraft(payload, incidentId);
+  } catch {
+    // An unreadable 200 response cannot undo a possibly committed draft.
+    throw new PostmortemApiError("uncertain");
+  }
 }
